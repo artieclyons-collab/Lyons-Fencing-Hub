@@ -20,6 +20,7 @@ import {
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
+import { lookupSuburb } from "@/lib/geocode";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -420,13 +421,21 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
 }
 
 // ---------- Quotes ----------
-function Quotes({ quotes, setQuotes, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber }) {
+function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber }) {
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
   const quickFileInputRef = useRef(null);
   const previewNumber = () => `LFS${settings?.nextDocNumber || 458}`;
+
+  // Sum of any invoices already paid against this quote (deposit or part-payment),
+  // so the final invoice can suggest subtracting what's already been collected.
+  const linkedPaidTotal = (quoteId) =>
+    (invoices || [])
+      .filter((i) => i.quoteId === quoteId && i.status === "Paid")
+      .reduce((s, i) => s + gstBreakdown(itemsTotal(i.items)).total, 0);
 
   useEffect(() => {
     if (pendingNewFrom) {
@@ -449,9 +458,29 @@ function Quotes({ quotes, setQuotes, setInvoices, pendingNewFrom, clearPending, 
   };
   const remove = (id) => setQuotes((qs) => qs.filter((q) => q.id !== id));
 
-  const convertToInvoice = (q) => {
+  const openFinalInvoice = (q) => {
+    setModal(null);
+    setFinalInvoiceQuote(q);
+  };
+
+  // Bills the full scope of works, minus anything already paid toward the job
+  // (a deposit invoice you raised, or an amount you took outside the app —
+  // either way it's entered on the Final invoice modal). If nothing's been
+  // paid, this is just the full quote amount, same as billing it outright.
+  const createFinalInvoice = (q, depositPaid) => {
     const docNumber = previewNumber();
     bumpDocNumber();
+    const items = (q.items || []).map((it) => ({ ...it }));
+    const deposit = Number(depositPaid) || 0;
+    if (deposit > 0) {
+      items.push({
+        id: uid(),
+        desc: "Less: deposit / part-payment already received.",
+        qty: 1,
+        rate: Number((-deposit / 1.1).toFixed(2)),
+        unit: "job",
+      });
+    }
     const inv = {
       id: uid(),
       docNumber,
@@ -459,15 +488,16 @@ function Quotes({ quotes, setQuotes, setInvoices, pendingNewFrom, clearPending, 
       address: q.address,
       suburb: q.suburb,
       jobType: q.jobType,
-      items: q.items,
+      items,
       status: "Unpaid",
       issuedDate: today(),
       dueDate: "",
+      notes: `Final invoice for completed job, per quote ${q.docNumber || ""}.`,
       quoteId: q.id,
     };
     setInvoices((is) => [inv, ...is]);
     setQuotes((qs) => qs.map((x) => (x.id === q.id ? { ...x, status: "Accepted" } : x)));
-    setModal(null);
+    setFinalInvoiceQuote(null);
   };
 
   // Bills just the deposit — the ex-GST line amount works out so that once GST is
@@ -572,15 +602,58 @@ function Quotes({ quotes, setQuotes, setInvoices, pendingNewFrom, clearPending, 
           onClose={() => setModal(null)}
           onSave={save}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
-          onConvert={modal.data?.id && modal.data.status !== "Accepted" ? () => convertToInvoice(modal.data) : null}
+          onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={modal.data?.id && modal.data.status === "Accepted" ? () => createDepositInvoice(modal.data) : null}
+        />
+      )}
+      {finalInvoiceQuote && (
+        <FinalInvoiceModal
+          quote={finalInvoiceQuote}
+          suggestedDeposit={linkedPaidTotal(finalInvoiceQuote.id)}
+          onClose={() => setFinalInvoiceQuote(null)}
+          onCreate={(depositPaid) => createFinalInvoice(finalInvoiceQuote, depositPaid)}
         />
       )}
     </div>
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onConvert, onCreateDeposit }) {
+function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
+  const [deposit, setDeposit] = useState(suggestedDeposit > 0 ? suggestedDeposit.toFixed(2) : "");
+  const quoteTotal = gstBreakdown(itemsTotal(quote.items)).total;
+  const depositNum = Number(deposit) || 0;
+  const balanceDue = Math.max(0, quoteTotal - depositNum);
+
+  return (
+    <Modal title="Create final invoice" onClose={onClose}>
+      <p className="calc-note">
+        Bills the remaining balance for {quote.clientName || "this job"} — the full scope of works, minus anything already paid. Leave the deposit field at $0 if the job went ahead without one.
+      </p>
+      <div className="cashflow-row" style={{ marginBottom: 12 }}>
+        <div>
+          <div className="cf-label">Job total (inc. GST)</div>
+          <div className="cf-value">{money(quoteTotal)}</div>
+        </div>
+      </div>
+      <Field label="Deposit / part-payment already received ($, inc. GST)">
+        <input type="number" step="0.01" value={deposit} onChange={(e) => setDeposit(e.target.value)} placeholder="0.00" />
+      </Field>
+      {suggestedDeposit > 0 && (
+        <p className="calc-note">Found a paid deposit invoice for this job worth {money(suggestedDeposit)} — pre-filled above, adjust if it's different.</p>
+      )}
+      <div className="job-cost-total" style={{ marginTop: 4 }}>
+        <span>Balance due (inc. GST)</span><span>{money(balanceDue)}</span>
+      </div>
+      <div className="modal-actions">
+        <button className="btn-primary" onClick={() => onCreate(depositNum)}>
+          <Receipt size={15} /> Create invoice for {money(balanceDue)}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onFinalInvoice, onCreateDeposit }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", crew: "1", hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -589,9 +662,25 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   const [scanError, setScanError] = useState("");
   const [estimatingRoute, setEstimatingRoute] = useState(false);
   const [routeError, setRouteError] = useState("");
+  const [lookingUpSuburb, setLookingUpSuburb] = useState(false);
+  const [suburbError, setSuburbError] = useState("");
   const fileInputRef = useRef(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItems = (updater) => setForm((f) => ({ ...f, items: typeof updater === "function" ? updater(f.items) : updater }));
+
+  const handleFindSuburb = async () => {
+    if (!form.address) return;
+    setLookingUpSuburb(true);
+    setSuburbError("");
+    try {
+      const suburb = await lookupSuburb(form.address);
+      set("suburb", suburb);
+    } catch (err) {
+      setSuburbError(err.message || "Couldn't find that address — enter the suburb manually.");
+    } finally {
+      setLookingUpSuburb(false);
+    }
+  };
 
   useEffect(() => {
     if (initial?._autoPrefill) {
@@ -671,10 +760,16 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       {form.status === "Accepted" && (
         <Field label="Job start date"><input type="date" value={form.startDate || ""} onChange={(e) => set("startDate", e.target.value)} /></Field>
       )}
-      <div className="field-pair">
-        <Field label="Street address"><input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" /></Field>
-        <Field label="Suburb, state, postcode"><input value={form.suburb || ""} onChange={(e) => set("suburb", e.target.value)} placeholder="e.g. Palm Beach QLD 4221" /></Field>
-      </div>
+      <Field label="Street address">
+        <div className="calc-trigger-row">
+          <input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" style={{ flex: 1 }} />
+          <button type="button" className="btn-ghost small" onClick={handleFindSuburb} disabled={!form.address || lookingUpSuburb}>
+            <MapPin size={14} /> {lookingUpSuburb ? "Finding…" : "Find suburb"}
+          </button>
+        </div>
+      </Field>
+      {suburbError && <p className="calc-note" style={{ color: "var(--bad)" }}>{suburbError}</p>}
+      <Field label="Suburb, state, postcode"><input value={form.suburb || ""} onChange={(e) => set("suburb", e.target.value)} placeholder="e.g. Palm Beach QLD 4221" /></Field>
       <div className="field-pair">
         <Field label="Job length (m)"><input type="number" value={form.jobLength || ""} onChange={(e) => set("jobLength", e.target.value)} placeholder="e.g. 25" /></Field>
         <Field label="Fence height (m)"><input type="number" step="0.1" value={form.fenceHeight || ""} onChange={(e) => set("fenceHeight", e.target.value)} placeholder="e.g. 1.8" /></Field>
@@ -781,7 +876,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
 
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
-        {onConvert && <button className="btn-ghost" onClick={onConvert}><Receipt size={15} /> Convert to invoice</button>}
+        {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         {onCreateDeposit && <button className="btn-ghost" onClick={onCreateDeposit}><Receipt size={15} /> Create deposit invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
@@ -854,9 +949,25 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
 function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
+  const [lookingUpSuburb, setLookingUpSuburb] = useState(false);
+  const [suburbError, setSuburbError] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItems = (updater) => setForm((f) => ({ ...f, items: typeof updater === "function" ? updater(f.items) : updater }));
   const addNote = (snippet) => set("notes", form.notes ? `${form.notes}\n${snippet}` : snippet);
+
+  const handleFindSuburb = async () => {
+    if (!form.address) return;
+    setLookingUpSuburb(true);
+    setSuburbError("");
+    try {
+      const suburb = await lookupSuburb(form.address);
+      set("suburb", suburb);
+    } catch (err) {
+      setSuburbError(err.message || "Couldn't find that address — enter the suburb manually.");
+    } finally {
+      setLookingUpSuburb(false);
+    }
+  };
 
   return (
     <Modal title={initial?.id ? "Edit invoice" : "New invoice"} onClose={onClose}>
@@ -864,10 +975,16 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
-      <div className="field-pair">
-        <Field label="Street address"><input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" /></Field>
-        <Field label="Suburb, state, postcode"><input value={form.suburb || ""} onChange={(e) => set("suburb", e.target.value)} placeholder="e.g. Palm Beach QLD 4221" /></Field>
-      </div>
+      <Field label="Street address">
+        <div className="calc-trigger-row">
+          <input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" style={{ flex: 1 }} />
+          <button type="button" className="btn-ghost small" onClick={handleFindSuburb} disabled={!form.address || lookingUpSuburb}>
+            <MapPin size={14} /> {lookingUpSuburb ? "Finding…" : "Find suburb"}
+          </button>
+        </div>
+      </Field>
+      {suburbError && <p className="calc-note" style={{ color: "var(--bad)" }}>{suburbError}</p>}
+      <Field label="Suburb, state, postcode"><input value={form.suburb || ""} onChange={(e) => set("suburb", e.target.value)} placeholder="e.g. Palm Beach QLD 4221" /></Field>
       <div className="field-pair">
         <Field label="Issued"><input type="date" value={form.issuedDate || ""} onChange={(e) => set("issuedDate", e.target.value)} /></Field>
         <Field label="Due"><input type="date" value={form.dueDate || ""} onChange={(e) => set("dueDate", e.target.value)} /></Field>
@@ -1495,7 +1612,7 @@ export default function HubApp() {
             {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} />}
             {tab === "leads" && <Leads leads={leads} setLeads={setLeads} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} />}
+            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} />}

@@ -96,3 +96,10 @@ create table if not exists settings (
 -- Single-user tool with no auth (per the build brief): RLS stays off, access is
 -- gated by keeping the app URL + anon key private. If you ever add Supabase Auth,
 -- enable RLS on all six tables and add authenticated-only policies.
+-- Supabase enables RLS by default on new tables — turn it back off explicitly.
+alter table leads disable row level security;
+alter table quotes disable row level security;
+alter table invoices disable row level security;
+alter table materials disable row level security;
+alter table expenses disable row level security;
+alter table settings disable row level security;
