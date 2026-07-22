@@ -72,6 +72,44 @@ function Field({ label, children }) {
 }
 
 // ---------- Dashboard ----------
+// A brand flourish for the board — a stylised paling-fence silhouette with a
+// low Gold Coast sun behind it. Pure inline SVG using the existing theme
+// colours, so no image assets or extra libraries to load.
+function FenceHero() {
+  const palings = Array.from({ length: 22 }, (_, i) => i);
+  return (
+    <svg
+      viewBox="0 0 700 84"
+      width="100%"
+      height="70"
+      preserveAspectRatio="none"
+      className="fence-hero"
+      aria-hidden="true"
+    >
+      <circle cx="580" cy="26" r="34" fill="var(--hivis)" opacity="0.16" />
+      <circle cx="580" cy="26" r="20" fill="var(--hivis)" opacity="0.22" />
+      <line x1="0" y1="68" x2="700" y2="68" stroke="var(--line)" strokeWidth="2" />
+      <line x1="4" y1="18" x2="696" y2="18" stroke="var(--timber)" strokeWidth="3" opacity="0.5" />
+      {palings.map((i) => {
+        const x = 4 + i * 32;
+        const h = i % 4 === 0 ? 58 : 48;
+        return (
+          <rect
+            key={i}
+            x={x}
+            y={68 - h}
+            width="20"
+            height={h}
+            rx="2"
+            fill="var(--timber)"
+            opacity={i % 2 === 0 ? 0.85 : 0.6}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
   const activeLeads = leads.filter((l) => !["Won", "Lost"].includes(l.status));
   const pendingQuotes = quotes.filter((q) => q.status === "Sent" || q.status === "Draft");
@@ -94,9 +132,10 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
     .sort((a, b) => daysSince(b.date) - daysSince(a.date));
 
   const thisMonth = new Date().toISOString().slice(0, 7);
+  // Income inc. GST, to match expenses (logged as the GST-inclusive receipt amount) — otherwise "Net" compares apples to oranges.
   const monthIncome = invoices
     .filter((i) => i.status === "Paid" && (i.paidDate || i.issuedDate || "").slice(0, 7) === thisMonth)
-    .reduce((s, i) => s + itemsTotal(i.items), 0);
+    .reduce((s, i) => s + gstBreakdown(itemsTotal(i.items)).total, 0);
   const monthExpense = expenses
     .filter((e) => (e.date || "").slice(0, 7) === thisMonth)
     .reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -110,6 +149,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
 
   return (
     <div>
+      <FenceHero />
       <div className="section-head">
         <h1>Job board</h1>
         <p>Everything moving through Lyons Fencing & Services right now.</p>
@@ -1308,8 +1348,16 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
   const remove = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
 
   const paidInvoices = invoices.filter((i) => i.status === "Paid");
-  const totalIncome = paidInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
+  // Income shown inc. GST, since expenses are logged as the GST-inclusive amount
+  // off a receipt — comparing ex-GST income to inc-GST expenses understated
+  // revenue against costs. GST collected/paid below is the BAS-relevant split.
+  const totalIncomeExGst = paidInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
+  const totalIncome = gstBreakdown(totalIncomeExGst).total;
+  const gstCollected = totalIncome - totalIncomeExGst;
   const totalExpense = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  // Assumes logged expense amounts are GST-inclusive (as they'd appear on a receipt).
+  const gstOnExpenses = totalExpense / 11;
+  const netGst = gstCollected - gstOnExpenses;
   const actualFuelSpend = expenses.filter((e) => e.category === "Fuel").reduce((s, e) => s + Number(e.amount || 0), 0);
   const estimatedFuelAcrossQuotes = (quotes || []).reduce((s, q) => s + estFuelCost(q.distanceKm, settings), 0);
 
@@ -1319,7 +1367,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
       const m = (i.paidDate || i.issuedDate || "").slice(0, 7);
       if (!m) return;
       map[m] = map[m] || { income: 0, expense: 0 };
-      map[m].income += itemsTotal(i.items);
+      map[m].income += gstBreakdown(itemsTotal(i.items)).total;
     });
     expenses.forEach((e) => {
       const m = (e.date || "").slice(0, 7);
@@ -1349,18 +1397,39 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
         <div className="stat-card static">
           <TrendingUp size={20} />
           <div className="stat-value good">{money(totalIncome)}</div>
-          <div className="stat-label">Total income (paid)</div>
+          <div className="stat-label">Total income (paid, inc. GST)</div>
         </div>
         <div className="stat-card static">
           <TrendingDown size={20} />
           <div className="stat-value bad">{money(totalExpense)}</div>
-          <div className="stat-label">Total expenses</div>
+          <div className="stat-label">Total expenses (inc. GST)</div>
         </div>
         <div className="stat-card static">
           <Wallet size={20} />
           <div className={`stat-value ${totalIncome - totalExpense >= 0 ? "good" : "bad"}`}>{money(totalIncome - totalExpense)}</div>
           <div className="stat-label">Net</div>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head"><Receipt size={16} /><span>GST summary (for BAS)</span></div>
+        <div className="cashflow-row">
+          <div>
+            <div className="cf-label">GST collected (paid invoices)</div>
+            <div className="cf-value good">{money(gstCollected)}</div>
+          </div>
+          <div>
+            <div className="cf-label">GST paid (expenses)</div>
+            <div className="cf-value bad">{money(gstOnExpenses)}</div>
+          </div>
+          <div>
+            <div className="cf-label">Net GST {netGst >= 0 ? "owing" : "refund"}</div>
+            <div className={`cf-value ${netGst >= 0 ? "bad" : "good"}`}>{money(Math.abs(netGst))}</div>
+          </div>
+        </div>
+        <p className="calc-note" style={{ marginTop: 8 }}>
+          Assumes logged expense amounts are GST-inclusive, as they'd appear on a receipt. A rough figure to speed up your BAS prep — always confirm with your bookkeeper or accountant before lodging.
+        </p>
       </div>
 
       {byMonth.length > 0 && (

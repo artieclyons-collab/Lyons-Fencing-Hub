@@ -35,6 +35,8 @@ html, body{ margin:0; padding:0; background:var(--bg); }
   font-size:12px; padding:8px 16px; text-align:center;
 }
 
+.fence-hero{ display:block; margin-bottom:14px; }
+
 .section-head h1{ font-family:'Barlow Condensed',sans-serif; font-size:26px; font-weight:700; margin:0 0 2px; letter-spacing:0.2px;}
 .section-head p{ color:var(--text-dim); font-size:13px; margin:0 0 18px; }
 .section-head.row{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
