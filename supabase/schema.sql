@@ -41,6 +41,9 @@ create table if not exists quotes (
   "materialsCost" text,
   "jobLength" text,
   "fenceHeight" text,
+  "materialsBreakdown" jsonb default '[]'::jsonb,
+  "acceptedAt" text,
+  "acceptedByName" text,
   inserted_at timestamptz not null default now()
 );
 

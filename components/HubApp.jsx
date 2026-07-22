@@ -7,7 +7,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import {
   LayoutGrid, Users, FileText, Receipt, Boxes, Wallet,
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
-  AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download
+  AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
+  ShoppingCart, Share2,
 } from "lucide-react";
 
 import {
@@ -16,7 +17,7 @@ import {
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, calcMaterials, estFuelCost,
+  buildFilename, suggestedNotes, calcMaterials, estFuelCost, quarterOptions,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
@@ -452,7 +453,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
       )}
 
       <div className="modal-actions">
-        <button className="btn-primary" disabled={!form.length} onClick={() => onApply(total)}>
+        <button className="btn-primary" disabled={!form.length} onClick={() => onApply(total, preview)}>
           <Plus size={15} /> Add to your costs
         </button>
       </div>
@@ -704,6 +705,8 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   const [routeError, setRouteError] = useState("");
   const [lookingUpSuburb, setLookingUpSuburb] = useState(false);
   const [suburbError, setSuburbError] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [linkFallback, setLinkFallback] = useState("");
   const fileInputRef = useRef(null);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItems = (updater) => setForm((f) => ({ ...f, items: typeof updater === "function" ? updater(f.items) : updater }));
@@ -719,6 +722,30 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       setSuburbError(err.message || "Couldn't find that address — enter the suburb manually.");
     } finally {
       setLookingUpSuburb(false);
+    }
+  };
+
+  // Lets the client review and accept the quote themselves at /accept/[id] —
+  // tries the native share sheet first (best on mobile), falls back to
+  // clipboard, falls back to just showing the link to copy by hand.
+  const shareAcceptLink = async () => {
+    if (!initial?.id) return;
+    const url = `${window.location.origin}/accept/${initial.id}`;
+    setLinkFallback("");
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Quote ${initial.docNumber || ""} — Lyons Fencing`, text: "Here's your quote — tap to review and accept:", url });
+        return;
+      } catch {
+        return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      setLinkFallback(url);
     }
   };
 
@@ -797,6 +824,9 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           </select>
         </Field>
       </div>
+      {form.acceptedByName && (
+        <p className="calc-note">Digitally accepted by {form.acceptedByName} on {formatDateAU(form.acceptedAt)}.</p>
+      )}
       {form.status === "Accepted" && (
         <Field label="Job start date"><input type="date" value={form.startDate || ""} onChange={(e) => set("startDate", e.target.value)} /></Field>
       )}
@@ -838,7 +868,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         {materialsCost > 0 && (
           <div className="fuel-note">
             <Boxes size={14} /> {money(materialsCost)} in materials added
-            <button type="button" className="btn-ghost small" onClick={() => set("materialsCost", 0)}>Clear</button>
+            <button type="button" className="btn-ghost small" onClick={() => { set("materialsCost", 0); set("materialsBreakdown", []); }}>Clear</button>
           </div>
         )}
 
@@ -906,8 +936,9 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           materials={materials}
           prefill={scanPrefill}
           onClose={() => { setShowCalc(false); setScanPrefill(null); }}
-          onApply={(total) => {
+          onApply={(total, items) => {
             set("materialsCost", materialsCost + total);
+            set("materialsBreakdown", [...(form.materialsBreakdown || []), ...items]);
             setShowCalc(false);
             setScanPrefill(null);
           }}
@@ -916,11 +947,15 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
 
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
+        {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         {onCreateDeposit && <button className="btn-ghost" onClick={onCreateDeposit}><Receipt size={15} /> Create deposit invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
+      {linkFallback && (
+        <p className="calc-note" style={{ padding: "0 18px 16px" }}>Couldn't copy automatically — here's the link to send: <strong style={{ userSelect: "all" }}>{linkFallback}</strong></p>
+      )}
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
     </Modal>
@@ -1258,6 +1293,59 @@ function MaterialModal({ initial, onClose, onSave, onDelete }) {
   );
 }
 
+// ---------- Shopping list (materials needed, per job) ----------
+function ShoppingList({ quotes, go }) {
+  const jobs = quotes
+    .filter((q) => q.status === "Accepted")
+    .sort((a, b) => {
+      if (a.startDate && b.startDate) return a.startDate.localeCompare(b.startDate);
+      if (a.startDate) return -1;
+      if (b.startDate) return 1;
+      return 0;
+    });
+
+  return (
+    <div>
+      <div className="section-head">
+        <h1>Shopping list</h1>
+        <p>Materials to buy for each upcoming job — one list per job, from the material calculator on each quote.</p>
+      </div>
+
+      {jobs.length === 0 ? (
+        <EmptyState icon={ShoppingCart} title="No upcoming jobs" hint="Accepted quotes with a materials breakdown show up here, one list per job." />
+      ) : (
+        <div className="list">
+          {jobs.map((q) => {
+            const breakdown = q.materialsBreakdown || [];
+            const total = itemsTotal(breakdown);
+            return (
+              <div className="panel" key={q.id}>
+                <div className="panel-head">
+                  <Boxes size={16} />
+                  <span>{q.clientName || "Untitled"} — {q.jobType}{q.startDate ? ` · starts ${formatDateAU(q.startDate)}` : ""}</span>
+                </div>
+                {breakdown.length === 0 ? (
+                  <p className="calc-note">
+                    No materials breakdown yet — open this quote and use "Calculate materials" to populate a shopping list.{" "}
+                    <button type="button" className="btn-ghost small" onClick={() => go("quotes")}>Go to Quotes</button>
+                  </p>
+                ) : (
+                  <div className="calc-preview">
+                    {breakdown.map((it) => (
+                      <div key={it.id} className="calc-row"><span>{it.desc} × {it.qty}</span><span>{money(Number(it.qty) * Number(it.rate))}</span></div>
+                    ))}
+                    <div className="calc-row calc-row-total"><span>Job total</span><span>{money(total)}</span></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Clients ----------
 function Clients({ leads, quotes, invoices, go }) {
   const clientMap = useMemo(() => {
@@ -1340,12 +1428,78 @@ function Clients({ leads, quotes, invoices, go }) {
 // ---------- Finances ----------
 function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
   const [modal, setModal] = useState(null);
+  const quarters = useMemo(() => quarterOptions(), []);
+  const [basQuarter, setBasQuarter] = useState(quarters[0]);
+  const [basDownloading, setBasDownloading] = useState(false);
+  const [basError, setBasError] = useState("");
+
   const save = (data) => {
     if (data.id) setExpenses((es) => es.map((e) => (e.id === data.id ? data : e)));
     else setExpenses((es) => [{ ...data, id: uid() }, ...es]);
     setModal(null);
   };
   const remove = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
+
+  // Same GST-inclusive assumption as the summary above, scoped to one BAS period.
+  const downloadBas = async () => {
+    setBasDownloading(true);
+    setBasError("");
+    try {
+      const inPeriod = (dateStr) => dateStr && dateStr >= basQuarter.startIso && dateStr <= basQuarter.endIso;
+      const periodInvoices = invoices.filter((i) => i.status === "Paid" && inPeriod(i.paidDate || i.issuedDate));
+      const totalSalesExGst = periodInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
+      const totalSalesIncGst = gstBreakdown(totalSalesExGst).total;
+      const gstCollectedPeriod = totalSalesIncGst - totalSalesExGst;
+
+      const periodExpenses = expenses.filter((e) => inPeriod(e.date));
+      const totalExpensesIncGstPeriod = periodExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+      const gstCreditsPeriod = totalExpensesIncGstPeriod / 11;
+      const netGstPeriod = gstCollectedPeriod - gstCreditsPeriod;
+
+      const byCategoryMap = {};
+      periodExpenses.forEach((e) => {
+        const cat = e.category || "Other";
+        byCategoryMap[cat] = (byCategoryMap[cat] || 0) + Number(e.amount || 0);
+      });
+      const byCategory = Object.entries(byCategoryMap)
+        .map(([category, total]) => ({ category, total }))
+        .sort((a, b) => b.total - a.total);
+
+      const data = {
+        periodLabel: basQuarter.label,
+        preparedDate: today(),
+        totalSalesIncGst,
+        gstCollected: gstCollectedPeriod,
+        totalExpensesIncGst: totalExpensesIncGstPeriod,
+        gstCredits: gstCreditsPeriod,
+        netGst: netGstPeriod,
+        byCategory,
+      };
+
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "bas", data }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `PDF generation failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${buildFilename("bas", data)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      setBasError(e.message || "PDF download failed — try again.");
+    } finally {
+      setBasDownloading(false);
+    }
+  };
 
   const paidInvoices = invoices.filter((i) => i.status === "Paid");
   // Income shown inc. GST, since expenses are logged as the GST-inclusive amount
@@ -1430,6 +1584,23 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
         <p className="calc-note" style={{ marginTop: 8 }}>
           Assumes logged expense amounts are GST-inclusive, as they'd appear on a receipt. A rough figure to speed up your BAS prep — always confirm with your bookkeeper or accountant before lodging.
         </p>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head"><FileText size={16} /><span>Quarterly BAS export</span></div>
+        <p className="calc-note" style={{ marginBottom: 10 }}>Pick a quarter and download a one-page summary — sales, GST collected, expenses, GST credits, and net GST — ready to hand to your bookkeeper or use for lodging.</p>
+        <div className="calc-trigger-row">
+          <select
+            value={basQuarter.label}
+            onChange={(e) => setBasQuarter(quarters.find((q) => q.label === e.target.value) || quarters[0])}
+          >
+            {quarters.map((q) => <option key={q.label} value={q.label}>{q.label}</option>)}
+          </select>
+          <button className="btn-primary small" onClick={downloadBas} disabled={basDownloading}>
+            <Download size={14} /> {basDownloading ? "Generating…" : "Download PDF"}
+          </button>
+        </div>
+        {basError && <p className="calc-note" style={{ color: "var(--bad)" }}>{basError}</p>}
       </div>
 
       {byMonth.length > 0 && (
@@ -1608,6 +1779,7 @@ const TABS = [
   { key: "quotes", label: "Quotes", icon: FileText },
   { key: "invoices", label: "Invoices", icon: Receipt },
   { key: "materials", label: "Materials", icon: Boxes },
+  { key: "shopping", label: "Shopping list", icon: ShoppingCart },
   { key: "finances", label: "Finances", icon: Wallet },
 ];
 
@@ -1684,6 +1856,7 @@ export default function HubApp() {
             {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
+            {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} />}
           </>
         )}
