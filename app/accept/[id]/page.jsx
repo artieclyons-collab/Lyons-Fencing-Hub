@@ -6,9 +6,8 @@
 // as a cryptographic e-signature.
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/storage";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
-import { formatDateAU, today } from "@/lib/logic";
+import { formatDateAU } from "@/lib/logic";
 
 const pageStyle = { background: "#f4f4f2", minHeight: "100vh", padding: "24px 12px", fontFamily: "'Barlow', Arial, sans-serif" };
 const wrapStyle = { maxWidth: 780, margin: "0 auto" };
@@ -29,19 +28,18 @@ export default function AcceptQuotePage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!supabase) {
-        setError("This link isn't connected to a database yet.");
-        setLoading(false);
-        return;
-      }
       try {
-        const { data, error: err } = await supabase.from("quotes").select("*").eq("id", id).limit(1);
-        if (err) throw err;
+        const res = await fetch(`/api/accept/${id}`);
+        const body = await res.json().catch(() => ({}));
         if (cancelled) return;
-        if (!data || data.length === 0) {
-          setError("We couldn't find that quote — the link may be out of date. Contact Lyons Fencing & Services directly.");
+        if (!res.ok) {
+          setError(
+            res.status === 404
+              ? "We couldn't find that quote — the link may be out of date. Contact Lyons Fencing & Services directly."
+              : body.error || "Something went wrong loading this quote — try again shortly."
+          );
         } else {
-          setQuote(data[0]);
+          setQuote(body.quote);
         }
       } catch {
         if (!cancelled) setError("Something went wrong loading this quote — try again shortly.");
@@ -56,12 +54,14 @@ export default function AcceptQuotePage() {
     if (status === "Accepted" && !name.trim()) return;
     setSubmitting(true);
     try {
-      const updates = status === "Accepted"
-        ? { status: "Accepted", acceptedAt: today(), acceptedByName: name.trim() }
-        : { status: "Declined" };
-      const { error: err } = await supabase.from("quotes").update(updates).eq("id", id);
-      if (err) throw err;
-      setQuote((q) => ({ ...q, ...updates }));
+      const res = await fetch(`/api/accept/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, name: name.trim() }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Submit failed");
+      setQuote((q) => ({ ...q, ...body.quote }));
     } catch {
       setError("Couldn't submit — check your connection and try again.");
     } finally {

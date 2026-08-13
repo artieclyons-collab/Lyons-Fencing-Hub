@@ -3,9 +3,10 @@
 // Usage:
 //   node scripts/import-data.mjs path/to/lyons-fencing-hub-export-YYYY-MM-DD.json
 //
-// Reads NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY from .env.local
-// (or the environment). Safe to re-run: rows are upserted by id, so running it
-// twice won't duplicate anything.
+// Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local
+// (or the environment) — with RLS on, the service role key is required; the
+// anon key can no longer write. Safe to re-run: rows are upserted by id, so
+// running it twice won't duplicate anything.
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,9 +23,9 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !key) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY — set them in .env.local first.");
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY — set them in .env.local first.");
   process.exit(1);
 }
 

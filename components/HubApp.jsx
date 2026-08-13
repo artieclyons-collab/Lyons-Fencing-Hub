@@ -17,7 +17,7 @@ import {
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, calcMaterials, estFuelCost, quarterOptions,
+  buildFilename, suggestedNotes, calcMaterials, estFuelCost,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
@@ -1428,10 +1428,6 @@ function Clients({ leads, quotes, invoices, go }) {
 // ---------- Finances ----------
 function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
   const [modal, setModal] = useState(null);
-  const quarters = useMemo(() => quarterOptions(), []);
-  const [basQuarter, setBasQuarter] = useState(quarters[0]);
-  const [basDownloading, setBasDownloading] = useState(false);
-  const [basError, setBasError] = useState("");
 
   const save = (data) => {
     if (data.id) setExpenses((es) => es.map((e) => (e.id === data.id ? data : e)));
@@ -1440,78 +1436,12 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
   };
   const remove = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
 
-  // Same GST-inclusive assumption as the summary above, scoped to one BAS period.
-  const downloadBas = async () => {
-    setBasDownloading(true);
-    setBasError("");
-    try {
-      const inPeriod = (dateStr) => dateStr && dateStr >= basQuarter.startIso && dateStr <= basQuarter.endIso;
-      const periodInvoices = invoices.filter((i) => i.status === "Paid" && inPeriod(i.paidDate || i.issuedDate));
-      const totalSalesExGst = periodInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
-      const totalSalesIncGst = gstBreakdown(totalSalesExGst).total;
-      const gstCollectedPeriod = totalSalesIncGst - totalSalesExGst;
-
-      const periodExpenses = expenses.filter((e) => inPeriod(e.date));
-      const totalExpensesIncGstPeriod = periodExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-      const gstCreditsPeriod = totalExpensesIncGstPeriod / 11;
-      const netGstPeriod = gstCollectedPeriod - gstCreditsPeriod;
-
-      const byCategoryMap = {};
-      periodExpenses.forEach((e) => {
-        const cat = e.category || "Other";
-        byCategoryMap[cat] = (byCategoryMap[cat] || 0) + Number(e.amount || 0);
-      });
-      const byCategory = Object.entries(byCategoryMap)
-        .map(([category, total]) => ({ category, total }))
-        .sort((a, b) => b.total - a.total);
-
-      const data = {
-        periodLabel: basQuarter.label,
-        preparedDate: today(),
-        totalSalesIncGst,
-        gstCollected: gstCollectedPeriod,
-        totalExpensesIncGst: totalExpensesIncGstPeriod,
-        gstCredits: gstCreditsPeriod,
-        netGst: netGstPeriod,
-        byCategory,
-      };
-
-      const res = await fetch("/api/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "bas", data }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `PDF generation failed (${res.status})`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${buildFilename("bas", data)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-    } catch (e) {
-      setBasError(e.message || "PDF download failed — try again.");
-    } finally {
-      setBasDownloading(false);
-    }
-  };
-
   const paidInvoices = invoices.filter((i) => i.status === "Paid");
   // Income shown inc. GST, since expenses are logged as the GST-inclusive amount
   // off a receipt — comparing ex-GST income to inc-GST expenses understated
-  // revenue against costs. GST collected/paid below is the BAS-relevant split.
-  const totalIncomeExGst = paidInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
-  const totalIncome = gstBreakdown(totalIncomeExGst).total;
-  const gstCollected = totalIncome - totalIncomeExGst;
+  // revenue against costs.
+  const totalIncome = paidInvoices.reduce((s, i) => s + gstBreakdown(itemsTotal(i.items)).total, 0);
   const totalExpense = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  // Assumes logged expense amounts are GST-inclusive (as they'd appear on a receipt).
-  const gstOnExpenses = totalExpense / 11;
-  const netGst = gstCollected - gstOnExpenses;
   const actualFuelSpend = expenses.filter((e) => e.category === "Fuel").reduce((s, e) => s + Number(e.amount || 0), 0);
   const estimatedFuelAcrossQuotes = (quotes || []).reduce((s, q) => s + estFuelCost(q.distanceKm, settings), 0);
 
@@ -1563,44 +1493,6 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
           <div className={`stat-value ${totalIncome - totalExpense >= 0 ? "good" : "bad"}`}>{money(totalIncome - totalExpense)}</div>
           <div className="stat-label">Net</div>
         </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-head"><Receipt size={16} /><span>GST summary (for BAS)</span></div>
-        <div className="cashflow-row">
-          <div>
-            <div className="cf-label">GST collected (paid invoices)</div>
-            <div className="cf-value good">{money(gstCollected)}</div>
-          </div>
-          <div>
-            <div className="cf-label">GST paid (expenses)</div>
-            <div className="cf-value bad">{money(gstOnExpenses)}</div>
-          </div>
-          <div>
-            <div className="cf-label">Net GST {netGst >= 0 ? "owing" : "refund"}</div>
-            <div className={`cf-value ${netGst >= 0 ? "bad" : "good"}`}>{money(Math.abs(netGst))}</div>
-          </div>
-        </div>
-        <p className="calc-note" style={{ marginTop: 8 }}>
-          Assumes logged expense amounts are GST-inclusive, as they'd appear on a receipt. A rough figure to speed up your BAS prep — always confirm with your bookkeeper or accountant before lodging.
-        </p>
-      </div>
-
-      <div className="panel">
-        <div className="panel-head"><FileText size={16} /><span>Quarterly BAS export</span></div>
-        <p className="calc-note" style={{ marginBottom: 10 }}>Pick a quarter and download a one-page summary — sales, GST collected, expenses, GST credits, and net GST — ready to hand to your bookkeeper or use for lodging.</p>
-        <div className="calc-trigger-row">
-          <select
-            value={basQuarter.label}
-            onChange={(e) => setBasQuarter(quarters.find((q) => q.label === e.target.value) || quarters[0])}
-          >
-            {quarters.map((q) => <option key={q.label} value={q.label}>{q.label}</option>)}
-          </select>
-          <button className="btn-primary small" onClick={downloadBas} disabled={basDownloading}>
-            <Download size={14} /> {basDownloading ? "Generating…" : "Download PDF"}
-          </button>
-        </div>
-        {basError && <p className="calc-note" style={{ color: "var(--bad)" }}>{basError}</p>}
       </div>
 
       {byMonth.length > 0 && (

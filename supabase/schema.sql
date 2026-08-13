@@ -96,13 +96,15 @@ create table if not exists settings (
   inserted_at timestamptz not null default now()
 );
 
--- Single-user tool with no auth (per the build brief): RLS stays off, access is
--- gated by keeping the app URL + anon key private. If you ever add Supabase Auth,
--- enable RLS on all six tables and add authenticated-only policies.
--- Supabase enables RLS by default on new tables — turn it back off explicitly.
-alter table leads disable row level security;
-alter table quotes disable row level security;
-alter table invoices disable row level security;
-alter table materials disable row level security;
-alter table expenses disable row level security;
-alter table settings disable row level security;
+-- Row Level Security is ON with no policies on every table — this is a deliberate
+-- default-deny lockout. Nobody can read or write these tables through the public
+-- REST API using the anon key; the app talks to Postgres exclusively through its
+-- own server-side API routes (see lib/supabaseAdmin.js), authenticated with the
+-- service_role key, which bypasses RLS by design. See supabase/migration-3-enable-rls.sql
+-- for the history of why this changed from an earlier RLS-off setup.
+alter table leads enable row level security;
+alter table quotes enable row level security;
+alter table invoices enable row level security;
+alter table materials enable row level security;
+alter table expenses enable row level security;
+alter table settings enable row level security;
