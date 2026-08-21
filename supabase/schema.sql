@@ -16,6 +16,7 @@ create table if not exists leads (
   "status" text,
   "notes" text,
   "createdAt" text,
+  "source" text,
   inserted_at timestamptz not null default now()
 );
 
