@@ -9,6 +9,19 @@ export const dynamic = "force-dynamic";
 // link with no login) — but scoped tightly: GET returns one quote by id,
 // POST only ever sets status to Accepted/Declined (+ name/date on accept).
 // No other fields can be touched through this route.
+
+// GET only returns what the client sees on the quote itself. Everything else on
+// the row (materials cost, labour, fuel, distance, hours, employees, phone,
+// internal breakdowns) stays on the server, since anyone with the link can call this.
+const PUBLIC_FIELDS = ["id", "docNumber", "clientName", "address", "suburb", "status", "date", "depositPercent", "notes", "acceptedAt", "acceptedByName"];
+
+function publicQuote(row) {
+  const out = {};
+  for (const f of PUBLIC_FIELDS) out[f] = row[f] ?? null;
+  out.items = (row.items || []).map((it) => ({ desc: it.desc, qty: it.qty, unit: it.unit, rate: it.rate }));
+  return out;
+}
+
 export async function GET(_req, { params }) {
   const { id } = await params;
   if (!supabaseAdmin) return NextResponse.json({ error: "Not configured" }, { status: 501 });
@@ -16,7 +29,7 @@ export async function GET(_req, { params }) {
   const { data, error } = await supabaseAdmin.from("quotes").select("*").eq("id", id).limit(1);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data || data.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ quote: data[0] });
+  return NextResponse.json({ quote: publicQuote(data[0]) });
 }
 
 export async function POST(req, { params }) {

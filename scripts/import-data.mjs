@@ -41,8 +41,8 @@ const supabase = createClient(url, key);
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 const COLUMNS = {
-  leads: ["id", "name", "phone", "email", "address", "jobType", "status", "notes", "createdAt"],
-  quotes: ["id", "docNumber", "clientName", "clientPhone", "address", "suburb", "jobType", "status", "date", "startDate", "validUntil", "depositPercent", "items", "notes", "distanceKm", "crew", "hours", "removalLength", "materialsCost", "jobLength", "fenceHeight", "materialsBreakdown", "acceptedAt", "acceptedByName"],
+  leads: ["id", "name", "phone", "email", "address", "jobType", "status", "notes", "createdAt", "source", "visitDate", "visitTime"],
+  quotes: ["id", "docNumber", "clientName", "clientPhone", "address", "suburb", "jobType", "status", "date", "startDate", "validUntil", "depositPercent", "items", "notes", "distanceKm", "crew", "employees", "labourRateType", "hours", "removalLength", "materialsCost", "jobLength", "fenceHeight", "materialsBreakdown", "acceptedAt", "acceptedByName"],
   invoices: ["id", "docNumber", "clientName", "address", "suburb", "jobType", "items", "status", "issuedDate", "dueDate", "paidDate", "notes", "quoteId"],
   materials: ["id", "name", "unit", "costPerUnit", "packQty", "qtyOnHand", "reorderLevel", "supplier"],
   expenses: ["id", "description", "category", "amount", "date"],

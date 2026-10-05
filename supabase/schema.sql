@@ -17,6 +17,8 @@ create table if not exists leads (
   "notes" text,
   "createdAt" text,
   "source" text,
+  "visitDate" text,
+  "visitTime" text,
   inserted_at timestamptz not null default now()
 );
 
@@ -37,6 +39,8 @@ create table if not exists quotes (
   "notes" text,
   "distanceKm" text,
   "crew" text,
+  "employees" text,
+  "labourRateType" text,
   "hours" text,
   "removalLength" text,
   "materialsCost" text,

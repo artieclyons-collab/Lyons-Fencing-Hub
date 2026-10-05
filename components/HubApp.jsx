@@ -13,11 +13,11 @@ import {
 
 import {
   JOB_TYPES, LEAD_STATUSES, QUOTE_STATUSES, INVOICE_STATUSES, EXPENSE_CATEGORIES,
-  NOTE_SNIPPETS, JOB_TEMPLATES, PRESET_MATERIALS, statusColor,
+  NOTE_SNIPPETS, JOB_TEMPLATES, PRESET_MATERIALS, LABOUR_RATES, statusColor,
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, calcMaterials, estFuelCost,
+  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, templateMaterialsCost, estFuelCost,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
@@ -294,6 +294,7 @@ function Leads({ leads, setLeads, go }) {
                 <div className="row-card-title">{l.name}</div>
                 <div className="row-card-meta">
                   {l.jobType} {l.address ? `· ${l.address}` : ""}
+                  {l.visitDate ? ` · Site visit ${formatDateAU(l.visitDate)}${l.visitTime ? ` ${l.visitTime}` : ""}` : ""}
                 </div>
               </div>
               <Tag label={l.status} />
@@ -341,6 +342,11 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
           </select>
         </Field>
       </div>
+      <div className="field-pair">
+        <Field label="Site visit date"><input type="date" value={form.visitDate || ""} onChange={(e) => set("visitDate", e.target.value)} /></Field>
+        <Field label="Visit time (optional)"><input type="time" value={form.visitTime || ""} onChange={(e) => set("visitTime", e.target.value)} /></Field>
+      </div>
+      <p className="calc-note" style={{ marginTop: -6 }}>A site visit goes straight into your iPhone calendar with reminders (see the calendar button at the top).</p>
       <Field label="Notes"><textarea rows={3} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Site details, measurements, timing..." /></Field>
 
       <div className="modal-actions">
@@ -353,7 +359,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
 }
 
 // ---------- Line items editor (shared by Quotes & Invoices) ----------
-function LineItems({ items, setItems, defaultLength, fenceHeight }) {
+function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTemplate }) {
   const update = (id, k, v) => setItems((its) => its.map((it) => (it.id === id ? { ...it, [k]: v } : it)));
   const remove = (id) => setItems((its) => its.filter((it) => it.id !== id));
   const add = () => setItems((its) => [...its, { id: uid(), desc: "", qty: 1, rate: 0 }]);
@@ -364,7 +370,8 @@ function LineItems({ items, setItems, defaultLength, fenceHeight }) {
       const qty = t.unit === "m" ? Number(defaultLength) || 1 : 1;
       const desc = t.desc.replace(/\{height\}/g, fenceHeight || "1.8");
       const rate = t.rateFn ? t.rateFn(fenceHeight) : t.rate;
-      setItems((its) => [...its, { id: uid(), desc, qty, rate, unit: t.unit }]);
+      setItems((its) => [...its, { id: uid(), desc, qty, rate, unit: t.unit, tpl: t.label }]);
+      onInsertTemplate?.(t);
     }
     e.target.value = "";
   };
@@ -695,7 +702,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
 }
 
 function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onFinalInvoice, onCreateDeposit }) {
-  const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", crew: "1", hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
+  const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [scanPrefill, setScanPrefill] = useState(null);
@@ -764,14 +771,22 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   }, [form.jobLength]);
 
   const fuelCost = estFuelCost(form.distanceKm, settings);
-  const hourlyRate = Number(settings?.hourlyRate) || 65;
-  const labourCost = (Number(form.crew) || 0) * (Number(form.hours) || 0) * hourlyRate;
+  const labourRate = (LABOUR_RATES.find((r) => r.id === form.labourRateType) || LABOUR_RATES[0]).rate;
+  const labourCost = (Number(form.employees) || 0) * (Number(form.hours) || 0) * labourRate;
   const tipRatePerMetre = Number(settings?.tipRatePerMetre) || 10;
   const tipCost = (Number(form.removalLength) || 0) * tipRatePerMetre;
-  const materialsCost = Number(form.materialsCost) || 0;
+  // Materials = whatever was added via "Calculate materials", plus fence templates' $/m x length (+ screws/nails for timber).
+  const addedMaterials = Number(form.materialsCost) || 0;
+  const templateMaterials = templateMaterialsCost(form.items, JOB_TEMPLATES, materials);
+  const materialsCost = addedMaterials + templateMaterials;
   const runningCosts = fuelCost + labourCost + tipCost + materialsCost;
-  const quoteTotal = itemsTotal(form.items);
+  // GST-inclusive, to compare like-for-like with the costs above (materials are entered inc GST too).
+  const quoteTotal = gstBreakdown(itemsTotal(form.items)).total;
   const addNote = (snippet) => set("notes", form.notes ? `${form.notes}\n${snippet}` : snippet);
+  // Inserting a sleeper template drops the sleeper timber note in automatically (once).
+  const handleTemplateInserted = (t) => {
+    if (/sleeper/i.test(t.desc) && !(form.notes || "").includes(SLEEPER_NOTE)) addNote(SLEEPER_NOTE);
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -848,7 +863,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
 
       <Field label="Line items">
         <p className="calc-note">This is what the client sees and pays — "Insert job template" below uses your job length and fence height automatically.</p>
-        <LineItems items={form.items} setItems={setItems} defaultLength={form.jobLength} fenceHeight={form.fenceHeight} />
+        <LineItems items={form.items} setItems={setItems} defaultLength={form.jobLength} fenceHeight={form.fenceHeight} onInsertTemplate={handleTemplateInserted} />
       </Field>
 
       <div className="panel job-cost-panel">
@@ -865,9 +880,15 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           <input type="file" accept="image/*" ref={fileInputRef} style={{ display: "none" }} onChange={handleFile} />
         </div>
         {scanError && <p className="calc-note" style={{ color: "var(--bad)" }}>{scanError}</p>}
-        {materialsCost > 0 && (
+        {templateMaterials > 0 && (
           <div className="fuel-note">
-            <Boxes size={14} /> {money(materialsCost)} in materials added
+            <Boxes size={14} /> {money(templateMaterials)} in materials from your fence templates (length × your cost per metre{form.items.some((it) => JOB_TEMPLATES.find((j) => j.label === it.tpl)?.timberStyle) ? ", plus screws and nails" : ""}).
+            "Calculate materials" still builds the shopping list but won't add to this.
+          </div>
+        )}
+        {addedMaterials > 0 && (
+          <div className="fuel-note">
+            <Boxes size={14} /> {money(addedMaterials)} in extra materials added
             <button type="button" className="btn-ghost small" onClick={() => { set("materialsCost", 0); set("materialsBreakdown", []); }}>Clear</button>
           </div>
         )}
@@ -889,9 +910,14 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
             : "Estimates a simple return trip from home (Tugun) to the job."}
         </p>
         <div className="field-pair">
-          <Field label="Crew size"><input type="number" value={form.crew || ""} onChange={(e) => set("crew", e.target.value)} /></Field>
+          <Field label="Employees"><input type="number" value={form.employees || ""} onChange={(e) => set("employees", e.target.value)} placeholder="0" /></Field>
           <Field label="Hours on site"><input type="number" value={form.hours || ""} onChange={(e) => set("hours", e.target.value)} placeholder="e.g. 8" /></Field>
         </div>
+        <Field label="Employee pay rate">
+          <select value={form.labourRateType || LABOUR_RATES[0].id} onChange={(e) => set("labourRateType", e.target.value)}>
+            {LABOUR_RATES.map((r) => <option key={r.id} value={r.id}>${r.rate}/hr {r.label}</option>)}
+          </select>
+        </Field>
         <Field label="Old timber fence removed (m)"><input type="number" value={form.removalLength || ""} onChange={(e) => set("removalLength", e.target.value)} placeholder="e.g. 25" /></Field>
 
         {runningCosts > 0 && (
@@ -903,7 +929,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
               <div><div className="cf-label">Tipping</div><div className="cf-value">{money(tipCost)}</div></div>
             </div>
             <div className="job-cost-total"><span>Total running costs</span><span>{money(runningCosts)}</span></div>
-            <div className="job-cost-total"><span>Quote total (what you're charging)</span><span>{money(quoteTotal)}</span></div>
+            <div className="job-cost-total"><span>Quote total inc. GST (what you're charging)</span><span>{money(quoteTotal)}</span></div>
             <div className="job-cost-total job-cost-margin"><span>Estimated margin</span><span>{money(quoteTotal - runningCosts)}</span></div>
             <p className="calc-note" style={{ marginTop: 6 }}>
               Tipping estimated at ${tipRatePerMetre}/m of old timber fence removed.
@@ -937,7 +963,8 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           prefill={scanPrefill}
           onClose={() => { setShowCalc(false); setScanPrefill(null); }}
           onApply={(total, items) => {
-            set("materialsCost", materialsCost + total);
+            // When fence templates already cost the materials, the calculator only feeds the shopping list.
+            if (templateMaterials <= 0) set("materialsCost", addedMaterials + total);
             set("materialsBreakdown", [...(form.materialsBreakdown || []), ...items]);
             setShowCalc(false);
             setScanPrefill(null);
@@ -1587,18 +1614,70 @@ function ExpenseModal({ initial, onClose, onSave, onDelete }) {
   );
 }
 
+// Private calendar feed for the iPhone — see app/api/calendar and lib/calendarFeed.js.
+function CalendarModal({ onClose }) {
+  const [links, setLinks] = useState(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/calendar/link")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("The calendar isn't set up on this site yet."))))
+      .then(setLinks)
+      .catch((e) => setError(e.message));
+  }, []);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(links.url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked — the link is in the box below to copy by hand.
+    }
+  };
+
+  return (
+    <Modal title="iPhone calendar" onClose={onClose}>
+      <p className="calc-note">
+        Subscribe once and these show up in your iPhone Calendar by themselves, and change when you change them in the hub:
+        job start dates, site visits, quote follow-ups (3 days after a quote is sent) and invoice due dates.
+      </p>
+      {error && <p className="calc-note" style={{ color: "var(--bad)" }}>{error}</p>}
+      {links && (
+        <>
+          <div className="calc-trigger-row">
+            <a className="btn-primary" href={links.webcal} style={{ textDecoration: "none" }}><CalendarDays size={15} /> Subscribe on iPhone</a>
+            <button type="button" className="btn-ghost" onClick={copy}>{copied ? "Copied!" : "Copy link"}</button>
+          </div>
+          <Field label="Calendar link (private — don't share it)">
+            <input readOnly value={links.url} onFocus={(e) => e.target.select()} />
+          </Field>
+          <p className="calc-note">
+            Easiest: open this screen on your iPhone and tap <strong>Subscribe on iPhone</strong>. Or copy the link, then on the iPhone go to
+            Settings → Calendar → Accounts → Add Account → Other → Add Subscribed Calendar and paste it in.
+          </p>
+          <p className="calc-note">
+            iPhone refreshes subscribed calendars on its own schedule, so new entries can take a while to appear
+            (it isn't instant). Reminders: the day before at 3pm and the morning of for job starts; the day before and an hour before for timed site visits; 9am for follow-ups and invoices.
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function SettingsModal({ settings, onSave, onClose }) {
-  const [form, setForm] = useState({ consumption: 10.5, fuelPrice: 1.85, hourlyRate: 65, tipRatePerMetre: 10, ...settings });
+  const [form, setForm] = useState({ consumption: 10.5, fuelPrice: 1.85, tipRatePerMetre: 10, ...settings });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
     <Modal title="Job cost defaults" onClose={onClose}>
-      <p className="calc-note">Used to estimate fuel, labour and tipping cost per job on quotes. Defaults are a rough starting point — adjust to what you're actually seeing.</p>
+      <p className="calc-note">Used to estimate fuel and tipping cost per job on quotes (employee pay is picked per quote — $40/hr cash or $50/hr ABN). Defaults are a rough starting point — adjust to what you're actually seeing.</p>
       <div className="field-pair">
         <Field label="Consumption (L/100km)"><input type="number" step="0.1" value={form.consumption ?? ""} onChange={(e) => set("consumption", e.target.value)} /></Field>
         <Field label="Diesel price ($/L)"><input type="number" step="0.01" value={form.fuelPrice ?? ""} onChange={(e) => set("fuelPrice", e.target.value)} /></Field>
       </div>
-      <Field label="Labour rate ($/hr per crew member)"><input type="number" step="1" value={form.hourlyRate ?? ""} onChange={(e) => set("hourlyRate", e.target.value)} /></Field>
       <Field label="Tipping estimate ($/m of old timber fence removed)"><input type="number" step="1" value={form.tipRatePerMetre ?? ""} onChange={(e) => set("tipRatePerMetre", e.target.value)} /></Field>
       <div className="modal-actions">
         <button className="btn-primary" onClick={() => onSave(form)}><Check size={15} /> Save</button>
@@ -1679,13 +1758,14 @@ export default function HubApp() {
   const [tab, setTab] = useState("dashboard");
   const [pendingNewFrom, setPendingNewFrom] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const [leads, setLeads, leadsLoaded] = usePersistedList("lyons:leads");
   const [quotes, setQuotes, quotesLoaded] = usePersistedList("lyons:quotes");
   const [invoices, setInvoices, invoicesLoaded] = usePersistedList("lyons:invoices");
   const [materials, setMaterials, materialsLoaded] = usePersistedList("lyons:materials");
   const [expenses, setExpenses, expensesLoaded] = usePersistedList("lyons:expenses");
-  const [settings, setSettings, settingsLoaded] = usePersistedValue("lyons:settings", { consumption: 10.5, fuelPrice: 1.85, hourlyRate: 65, tipRatePerMetre: 10, nextDocNumber: 458 });
+  const [settings, setSettings, settingsLoaded] = usePersistedValue("lyons:settings", { consumption: 10.5, fuelPrice: 1.85, tipRatePerMetre: 10, nextDocNumber: 458 });
 
   const allLoaded = leadsLoaded && quotesLoaded && invoicesLoaded && materialsLoaded && expensesLoaded && settingsLoaded;
 
@@ -1724,6 +1804,7 @@ export default function HubApp() {
             <div className="brand-sub">Business hub</div>
           </div>
         </div>
+        <button className="icon-btn settings-btn" onClick={() => setCalendarOpen(true)} title="iPhone calendar"><CalendarDays size={18} /></button>
         <button className="icon-btn settings-btn" onClick={handleExportData} title="Export all data"><Download size={18} /></button>
         <button className="icon-btn settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
       </header>
@@ -1754,6 +1835,7 @@ export default function HubApp() {
         )}
       </main>
 
+      {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
