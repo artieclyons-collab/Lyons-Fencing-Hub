@@ -306,3 +306,73 @@ html, body{ margin:0; padding:0; background:var(--bg); }
   margin-left:8px; padding:2px 8px; border:1px solid var(--hivis); color:var(--hivis); border-radius:20px;
   font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; vertical-align:middle;
 }
+
+/* ---------- job time + scheduling ---------- */
+.duration-box{ margin-bottom:14px; }
+.duration-estimate{ font-size:13.5px; color:var(--text-dim); }
+.duration-estimate strong{ color:var(--hivis); font-family:'Barlow Condensed',sans-serif; font-size:20px; margin-right:2px; }
+.check-row{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); margin:4px 0 8px; cursor:pointer; }
+.check-row input{ width:16px; height:16px; accent-color:var(--hivis); }
+
+.cal-cell.is-over{ border-color:var(--bad); }
+.cal-cell.is-over .cal-day::after{ content:"!"; margin-left:3px; color:var(--bad); font-weight:700; }
+.over-warning{
+  display:flex; align-items:center; gap:6px; margin:8px 0; padding:8px 10px; font-size:12.5px; color:var(--bad);
+  background:rgba(193,85,58,0.12); border:1px solid var(--bad); border-radius:6px;
+}
+.event-actions{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.event-actions .btn-ghost{ gap:3px; }
+
+.schedule-row{ padding:10px 0; border-top:1px solid var(--line); }
+.schedule-row:first-of-type{ border-top:none; }
+.schedule-dates{ display:flex; gap:10px; align-items:center; margin-top:6px; padding-left:24px; }
+.schedule-dates input{ background:var(--surface2); border:1px solid var(--line); border-radius:6px; padding:7px 9px; color:var(--text); font-size:13px; font-family:inherit; }
+.schedule-dates input:disabled{ opacity:0.4; }
+
+.save-error-banner{
+  display:flex; align-items:flex-start; gap:10px; padding:10px 16px; font-size:13px; line-height:1.4;
+  background:rgba(193,85,58,0.16); border-bottom:1px solid var(--bad); color:var(--text); position:sticky; top:0; z-index:20;
+}
+.save-error-banner svg{ color:var(--bad); flex-shrink:0; margin-top:2px; }
+.save-error-banner small{ display:block; margin-top:3px; color:var(--text-dim); font-size:11.5px; }
+.save-error-banner.warn{ background:rgba(232,185,35,0.14); border-bottom-color:var(--hivis); }
+.save-error-banner.warn svg{ color:var(--hivis); }
+
+/* ---------- search ---------- */
+.search-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.search-box{
+  flex:1; min-width:200px; display:flex; align-items:center; gap:8px; padding:0 10px;
+  background:var(--surface); border:1px solid var(--line); border-radius:8px; color:var(--text-dim);
+}
+.search-box:focus-within{ border-color:var(--hivis); }
+.search-box input{
+  flex:1; min-width:0; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:inherit; padding:10px 0;
+}
+.search-box input::-webkit-search-cancel-button{ display:none; }
+.search-filter{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:9px 10px; color:var(--text); font-size:13px; font-family:inherit; }
+.search-count{ font-size:12px; color:var(--text-dim); white-space:nowrap; }
+
+/* ---------- rain outlook ---------- */
+.wx-strip{ display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:8px; scrollbar-width:thin; }
+.wx-day{
+  flex:0 0 58px; display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 4px 6px;
+  background:var(--surface2); border:1px solid var(--line); border-radius:8px; color:var(--text-dim);
+}
+.wx-day.wx-today{ border-color:var(--hivis); }
+.wx-day.wx-showers{ background:rgba(124,139,133,0.18); }
+.wx-day.wx-wet{ background:rgba(74,128,181,0.22); border-color:#4A80B5; color:#9CC3EA; }
+.wx-day.wx-heavy{ background:rgba(74,128,181,0.4); border-color:#4A80B5; color:#C5DDF5; }
+.wx-dow{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; }
+.wx-date{ font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; color:var(--text); line-height:1; }
+.wx-mm{ font-size:12px; font-weight:600; color:var(--text); }
+.wx-chance{ font-size:10.5px; min-height:12px; }
+.wx-job{ display:flex; align-items:center; gap:2px; font-size:10.5px; font-weight:700; color:var(--hivis); }
+.wx-warn{ color:#9CC3EA; background:rgba(74,128,181,0.14); border-color:#4A80B5; flex-wrap:wrap; }
+.wx-warn > span{ flex:1; min-width:180px; color:var(--text); }
+.wx-warn strong{ color:var(--text); }
+.link-btn{ background:none; border:none; padding:0; color:var(--hivis); font-size:inherit; font-family:inherit; cursor:pointer; text-decoration:underline; }
+.wx-line{ display:flex; align-items:center; gap:6px; margin:8px 0; font-size:12.5px; color:var(--text-dim); }
+.wx-line.wx-wet, .wx-line.wx-heavy{ color:#9CC3EA; }
+.cal-cell.is-wet{ background:rgba(74,128,181,0.14); }
+.cal-rain{ display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:700; color:var(--text-dim); }
+.cal-rain.wx-wet, .cal-rain.wx-heavy{ color:#9CC3EA; }

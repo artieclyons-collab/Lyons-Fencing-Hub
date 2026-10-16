@@ -42,6 +42,8 @@ create table if not exists quotes (
   "employees" text,
   "labourRateType" text,
   "hours" text,
+  "durationHours" text,
+  "workSaturday" text,
   "removalLength" text,
   "materialsCost" text,
   "jobLength" text,

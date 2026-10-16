@@ -8,7 +8,7 @@ import {
   LayoutGrid, Users, FileText, Receipt, Boxes, Wallet,
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
-  ShoppingCart, Share2, Copy, Hammer,
+  ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
 } from "lucide-react";
 
 import {
@@ -24,6 +24,11 @@ import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storag
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
 import { lookupSuburb } from "@/lib/geocode";
 import { scheduleEvents, addDaysIso, FOLLOW_UP_DAYS } from "@/lib/schedule";
+import {
+  estimateHours, hoursLabel, jobDays, suggestSchedule, dayLoads, worksSaturday, isWorkDay, isIsoDate, HOURS_PER_DAY, shiftWorkDays,
+} from "@/lib/jobSchedule";
+import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
+import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -156,17 +161,145 @@ function shiftMonth(ym, delta) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function BoardCalendar({ events, onMove, go }) {
+const WEATHER_ICONS = { sun: Sun, partly: CloudSun, cloud: Cloud, fog: CloudFog, drizzle: CloudDrizzle, rain: CloudRain, storm: CloudLightning };
+const mmText = (mm) => (Number(mm) < 0.1 ? "dry" : `${Number(mm) >= 10 ? Math.round(mm) : Math.round(mm * 10) / 10}mm`);
+
+// Rain outlook: next ~2 weeks, wet days tinted, with a flag for any booked job that lands on one.
+function WeatherPanel({ forecast, error, jobsByDate, onPushBack }) {
+  const days = forecast || [];
+  const wetJobDays = days.filter((d) => isWetDay(d) && (jobsByDate[d.date] || []).length > 0);
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <CloudRain size={16} />
+        <span>Rain outlook — {WEATHER_LOCATION.name}</span>
+      </div>
+      {error && <p className="calc-note" style={{ margin: 0 }}>Couldn't load the forecast ({error}). The rest of the Board still works.</p>}
+      {!forecast && !error && <p className="calc-note" style={{ margin: 0 }}>Loading forecast…</p>}
+      {days.length > 0 && (
+        <div className="wx-strip">
+          {days.map((d) => {
+            const level = rainLevel(d.rainMm);
+            const Icon = WEATHER_ICONS[weatherIcon(d.code)];
+            const date = new Date(`${d.date}T00:00:00`);
+            const jobs = jobsByDate[d.date] || [];
+            return (
+              <div key={d.date} className={`wx-day wx-${level}${d.date === today() ? " wx-today" : ""}`} title={`${RAIN_LABEL[level]} · ${mmText(d.rainMm)}${d.chance != null ? ` · ${d.chance}% chance` : ""} · gusts ${Math.round(d.gust)} km/h`}>
+                <div className="wx-dow">{d.date === today() ? "Today" : date.toLocaleDateString("en-AU", { weekday: "short" })}</div>
+                <div className="wx-date">{date.getDate()}</div>
+                <Icon size={20} />
+                <div className="wx-mm">{mmText(d.rainMm)}</div>
+                <div className="wx-chance">{d.chance != null ? `${d.chance}%` : ""}</div>
+                {jobs.length > 0 && <div className="wx-job" title={jobs.join(", ")}><Hammer size={11} /> {jobs.length}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {wetJobDays.length > 0 && (
+        <div className="over-warning wx-warn">
+          <CloudRain size={14} />
+          <span>
+            Rain on job days:{" "}
+            {wetJobDays.slice(0, 4).map((d, i) => (
+              <span key={d.date}>{i > 0 ? "; " : ""}<strong>{(jobsByDate[d.date] || []).join(", ")}</strong> {new Date(`${d.date}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })} ({mmText(d.rainMm)})</span>
+            ))}
+            {wetJobDays.length > 4 ? ` +${wetJobDays.length - 4} more` : ""}
+          </span>
+          <button className="btn-ghost small" onClick={onPushBack}>Push jobs back…</button>
+        </div>
+      )}
+      <p className="calc-note" style={{ marginBottom: 0 }}>
+        Heavy = 15mm+, wet = 5mm+. The forecast only reaches about 2 weeks out, so later jobs show no rain yet.
+        {days.length > 0 && wetJobDays.length === 0 && " No booked job is on a wet day."}{" "}
+        {days.length > 0 && <button className="link-btn" onClick={onPushBack}>Push jobs back…</button>}
+      </p>
+    </div>
+  );
+}
+
+// Shift every booked job from a date onwards by some working days — for when a wet spell pushes everything back.
+function PushBackModal({ quotes, forecast, jobsByDate, onApply, onClose }) {
+  const t = today();
+  const firstWet = (forecast || []).find((d) => isWetDay(d) && (jobsByDate[d.date] || []).length > 0);
+  const dated = quotes.filter((q) => q.status === "Accepted" && isIsoDate(q.startDate) && q.startDate >= t).sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const [from, setFrom] = useState(firstWet?.date || dated[0]?.startDate || t);
+  const [days, setDays] = useState(2);
+  const n = Math.max(0, Math.round(Number(days) || 0));
+  const affected = dated.filter((q) => q.startDate >= from).map((q) => ({ q, to: shiftWorkDays(q.startDate, n, worksSaturday(q)) }));
+
+  return (
+    <Modal title="Push jobs back" onClose={onClose}>
+      <p className="calc-note">Moves every booked job that starts on or after the date below by the same number of working days (weekends skipped), so the gaps between jobs stay the same. You can still move any one of them afterwards.</p>
+      <div className="field-pair">
+        <Field label="From (jobs starting on or after)"><input type="date" value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /></Field>
+        <Field label="Push back by (working days)"><input type="number" min="0" step="1" value={days} onChange={(e) => setDays(e.target.value)} /></Field>
+      </div>
+      {affected.length === 0 ? (
+        <p className="calc-note">No booked jobs start on or after that date.</p>
+      ) : (
+        <div className="calc-preview">
+          {affected.map(({ q, to }) => (
+            <div key={q.id} className="calc-row">
+              <span>{q.clientName || "Untitled"}</span>
+              <span>{formatDateAU(q.startDate)} → {formatDateAU(to)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="modal-actions">
+        <button className="btn-primary" disabled={affected.length === 0 || n === 0} onClick={() => onApply(affected.map(({ q, to }) => ({ id: q.id, startDate: to })))}>
+          <Check size={15} /> Push back {affected.length} job{affected.length === 1 ? "" : "s"} by {n} day{n === 1 ? "" : "s"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// Search box (+ optional filters) shared by the Quotes, Invoices and Leads lists.
+function SearchBar({ value, onChange, placeholder, shown, total, children }) {
+  return (
+    <div className="search-row">
+      <div className="search-box">
+        <Search size={16} />
+        <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} />
+        {value && <button className="icon-btn" onClick={() => onChange("")} aria-label="Clear search"><X size={15} /></button>}
+      </div>
+      {children}
+      {(value || shown !== total) && <div className="search-count">{shown} of {total}</div>}
+    </div>
+  );
+}
+
+function BoardCalendar({ events, onMove, go, weather = {} }) {
   const t = today();
   const [month, setMonth] = useState(t.slice(0, 7));
   const [selected, setSelected] = useState(t);
   const [editing, setEditing] = useState(null); // uid of the event whose date is being changed
+  // What you type in the date/time boxes is held here and only applied when you press Save, so the arrow
+  // keys can step the date as many times as you like without the job jumping away mid-edit.
+  const [draft, setDraft] = useState({ date: "", time: "" });
+  const startEditing = (e) => {
+    setDraft({ date: e.editDate || e.date, time: e.time || "" });
+    setEditing(e.uid);
+  };
+  const saveEditing = (e) => {
+    if (draft.date) move(e, draft.date, draft.time);
+    setEditing(null);
+  };
 
   const byDate = useMemo(() => {
     const map = {};
     for (const e of events) (map[e.date] = map[e.date] || []).push(e);
     return map;
   }, [events]);
+  // How much of each day is booked with jobs (1 = a full day). Over 1 means two jobs are fighting for the day.
+  const loadByDate = useMemo(() => {
+    const map = {};
+    for (const e of events) if (e.kind === "job") map[e.date] = (map[e.date] || 0) + e.portion;
+    return map;
+  }, [events]);
+  const isOver = (date) => (loadByDate[date] || 0) > 1.001;
   const cells = monthCells(month);
   const dayEvents = byDate[selected] || [];
   const monthLabel = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
@@ -179,7 +312,13 @@ function BoardCalendar({ events, onMove, go }) {
   };
   const move = (e, date, time) => {
     onMove(e, date, time);
-    if (date && date !== e.date) pick(date);
+    if (date && date !== (e.editDate || e.date)) pick(date);
+  };
+  // Nudge a job / visit / invoice a day earlier or later (jobs hop over days they don't work).
+  const shift = (e, dir) => {
+    let d = addDaysIso(e.editDate || e.date, dir);
+    if (e.kind === "job") for (let i = 0; i < 8 && !isWorkDay(d, e.saturday); i++) d = addDaysIso(d, dir);
+    move(e, d, e.time);
   };
 
   return (
@@ -201,10 +340,13 @@ function BoardCalendar({ events, onMove, go }) {
           return (
             <button
               key={c.date}
-              className={`cal-cell${c.inMonth ? "" : " out"}${c.date === t ? " is-today" : ""}${c.date === selected ? " is-selected" : ""}`}
+              className={`cal-cell${c.inMonth ? "" : " out"}${c.date === t ? " is-today" : ""}${c.date === selected ? " is-selected" : ""}${isOver(c.date) ? " is-over" : ""}${isWetDay(weather[c.date]) ? " is-wet" : ""}`}
               onClick={() => pick(c.date)}
             >
               <span className="cal-day">{c.day}</span>
+              {weather[c.date] && rainLevel(weather[c.date].rainMm) !== "dry" && (
+                <span className={`cal-rain wx-${rainLevel(weather[c.date].rainMm)}`}><Droplets size={9} />{mmText(weather[c.date].rainMm).replace("mm", "")}</span>
+              )}
               <span className="cal-dots">
                 {evs.slice(0, 4).map((e) => <span key={e.uid} className={`cal-dot ${EVENT_KINDS[e.kind].cls}`} />)}
               </span>
@@ -217,7 +359,7 @@ function BoardCalendar({ events, onMove, go }) {
         })}
       </div>
       <div className="cal-legend">
-        <span><i className="cal-dot kind-job" /> Job start</span>
+        <span><i className="cal-dot kind-job" /> Job</span>
         <span><i className="cal-dot kind-visit" /> Site visit</span>
         <span><i className="cal-dot kind-followup" /> Follow-up</span>
         <span><i className="cal-dot kind-invoice" /> Invoice due</span>
@@ -227,6 +369,17 @@ function BoardCalendar({ events, onMove, go }) {
         <strong>{selected === t ? "Today" : selLabel}</strong>
         {selected === t && <span>{selLabel}</span>}
       </div>
+      {weather[selected] && (
+        <div className={`wx-line wx-${rainLevel(weather[selected].rainMm)}`}>
+          <Droplets size={13} /> {RAIN_LABEL[rainLevel(weather[selected].rainMm)]} forecast: {mmText(weather[selected].rainMm)}
+          {weather[selected].chance != null ? ` (${weather[selected].chance}% chance)` : ""}, gusts {Math.round(weather[selected].gust)} km/h
+        </div>
+      )}
+      {isOver(selected) && (
+        <div className="over-warning">
+          <AlertTriangle size={14} /> More than a day's work is booked on this day ({hoursLabel(Math.round((loadByDate[selected] || 0) * HOURS_PER_DAY * 4) / 4)}). Move one of them.
+        </div>
+      )}
       {dayEvents.length === 0 ? (
         <p className="calc-note" style={{ margin: 0 }}>Nothing on this day.</p>
       ) : (
@@ -245,14 +398,25 @@ function BoardCalendar({ events, onMove, go }) {
               {e.ref ? (
                 editing === e.uid ? (
                   <div className="event-edit">
-                    <input type="date" value={e.date} onChange={(ev) => ev.target.value && move(e, ev.target.value, e.time)} />
+                    <input
+                      type="date"
+                      value={draft.date}
+                      onChange={(ev) => setDraft((d) => ({ ...d, date: ev.target.value }))}
+                      onKeyDown={(ev) => { if (ev.key === "Enter") saveEditing(e); if (ev.key === "Escape") setEditing(null); }}
+                    />
                     {e.ref.timeField && (
-                      <input type="time" value={e.time || ""} onChange={(ev) => move(e, e.date, ev.target.value)} />
+                      <input type="time" value={draft.time} onChange={(ev) => setDraft((d) => ({ ...d, time: ev.target.value }))} />
                     )}
-                    <button className="btn-ghost small" onClick={() => setEditing(null)}>Done</button>
+                    <button className="btn-primary small" onClick={() => saveEditing(e)} disabled={!draft.date}><Check size={13} /> Save</button>
+                    <button className="btn-ghost small" onClick={() => setEditing(null)}>Cancel</button>
                   </div>
                 ) : (
-                  <button className="btn-ghost small event-change" onClick={() => setEditing(e.uid)}>Change date{e.ref.timeField ? " / time" : ""}</button>
+                  <div className="event-actions">
+                    <button className="btn-ghost small" onClick={() => shift(e, -1)} aria-label="Move a day earlier"><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> 1 day</button>
+                    <button className="btn-ghost small" onClick={() => shift(e, 1)} aria-label="Move a day later">1 day <ChevronRight size={14} /></button>
+                    <button className="btn-ghost small" onClick={() => startEditing(e)}>{e.kind === "job" ? "Change start date" : `Change date${e.ref.timeField ? " / time" : ""}`}</button>
+                    {e.kind === "job" && e.dayCount > 1 && <span className="event-note" style={{ margin: 0 }}>Moves all {e.dayCount} days.</span>}
+                  </div>
                 )
               ) : (
                 <div className="event-note">Follows 3 days after the quote was sent.</div>
@@ -265,8 +429,73 @@ function BoardCalendar({ events, onMove, go }) {
   );
 }
 
+// Review screen for accepted jobs that don't have a start date yet: shows where each would go (next free
+// working days, in the order they were accepted, around booked work) so you can tweak or skip before applying.
+function ScheduleModal({ quotes, todo, onApply, onClose }) {
+  const todoById = useMemo(() => Object.fromEntries(todo.map((q) => [q.id, q])), [todo]);
+  const [rows, setRows] = useState(() =>
+    suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || todoById[q.id]), today()).map((p) => ({ id: p.quote.id, include: true, start: p.start }))
+  );
+  const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  const booked = dayLoads(quotes.filter((q) => isIsoDate(q.startDate)));
+  const preview = rows.map((r) => ({ ...r, q: { ...todoById[r.id], status: "Accepted", startDate: r.start } }));
+  const load = { ...booked };
+  for (const p of preview) if (p.include) for (const d of jobDays(p.q)) load[d.date] = (load[d.date] || 0) + d.portion;
+  const chosen = preview.filter((p) => p.include && p.start);
+
+  return (
+    <Modal title="Schedule accepted jobs" onClose={onClose}>
+      <p className="calc-note">
+        These accepted jobs have no start date. Each is placed in the next free working days, in the order you accepted them, around work that's
+        already booked. Change any date, untick the ones you want to leave, then apply.
+      </p>
+      {preview.length === 0 && <p className="calc-note">Nothing to place.</p>}
+      {preview.map((p) => {
+        const e = estimateHours(p.q);
+        const days = jobDays(p.q);
+        const clash = days.some((d) => (load[d.date] || 0) > 1.001);
+        return (
+          <div key={p.id} className="schedule-row">
+            <label className="check-row" style={{ margin: 0 }}>
+              <input type="checkbox" checked={p.include} onChange={(ev) => setRow(p.id, { include: ev.target.checked })} />
+              <span><strong>{p.q.clientName || "Untitled"}</strong> · {p.q.jobType} · {hoursLabel(e.hours)}</span>
+            </label>
+            <div className="schedule-dates">
+              <input type="date" value={p.start} onChange={(ev) => ev.target.value && setRow(p.id, { start: ev.target.value })} disabled={!p.include} />
+              {days.length > 1 && <span className="calc-note" style={{ margin: 0 }}>→ {formatDateAU(days[days.length - 1].date)}</span>}
+            </div>
+            {p.include && clash && <div className="over-warning"><AlertTriangle size={14} /> Overlaps other booked work on those days.</div>}
+          </div>
+        );
+      })}
+      <div className="modal-actions">
+        <button className="btn-primary" disabled={chosen.length === 0} onClick={() => onApply(chosen.map((p) => ({ id: p.id, startDate: p.start })))}>
+          <Check size={15} /> Place {chosen.length} job{chosen.length === 1 ? "" : "s"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads, setQuotes, setInvoices }) {
   const t = today();
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [pushOpen, setPushOpen] = useState(false);
+  const [forecast, setForecast] = useState(null);
+  const [forecastError, setForecastError] = useState("");
+  useEffect(() => {
+    let off = false;
+    fetch("/api/weather")
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.error || "unavailable");
+        return body;
+      })
+      .then((b) => { if (!off) setForecast(b.days); })
+      .catch((e) => { if (!off) setForecastError(e.message); });
+    return () => { off = true; };
+  }, []);
   const inc = (items) => gstBreakdown(itemsTotal(items)).total;
   const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
   const whole = (n) => money(Math.round(n)).replace(/\.00$/, "");
@@ -285,8 +514,23 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   const overdue = unpaidInvoices.filter((i) => i.dueDate && i.dueDate < t);
   const owed = sum(unpaidInvoices, (i) => inc(i.items));
   const lowStock = materials.filter((m) => Number(m.reorderLevel) > 0 && Number(m.qtyOnHand) <= Number(m.reorderLevel));
-  // Accepted but no start date — ignoring jobs that already have an invoice raised (those are underway or done).
-  const acceptedNoDate = quotes.filter((q) => q.status === "Accepted" && !q.startDate && !invoices.some((i) => i.quoteId === q.id));
+  // Accepted but no start date. A final invoice means the job's done; a deposit invoice just means it's booked in.
+  const acceptedNoDate = quotes.filter((q) => q.status === "Accepted" && !isIsoDate(q.startDate) && !invoices.some((i) => i.quoteId === q.id && !isDepositInvoice(i)));
+
+  // Quotes a client accepts themselves online are dropped into the next free slot as soon as the Board opens
+  // (older undated jobs are left for you to review, so nothing gets a date you didn't see).
+  useEffect(() => {
+    const fresh = acceptedNoDate.filter((q) => q.acceptedAt && daysSince(q.acceptedAt) >= 0 && daysSince(q.acceptedAt) <= 14);
+    if (fresh.length === 0) return;
+    const ids = new Set(fresh.map((q) => q.id));
+    const placed = suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || ids.has(q.id)), today()).filter((p) => ids.has(p.quote.id));
+    if (placed.length === 0) return;
+    setQuotes((rows) => rows.map((r) => {
+      const p = placed.find((x) => x.quote.id === r.id);
+      return p && !isIsoDate(r.startDate) ? { ...r, startDate: p.start } : r;
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotes]);
   // Follow-ups are worth chasing for about a month; anything older is probably dead and just clutters the list.
   const needsFollowUp = quotes
     .filter((q) => q.status === "Sent" && daysSince(q.date) >= FOLLOW_UP_DAYS && daysSince(q.date) <= 30)
@@ -296,6 +540,10 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   // ----- schedule: next 2 weeks by day, plus the next few far-off jobs/visits -----
   const allEvents = scheduleEvents({ leads, quotes, invoices });
   const upcoming = allEvents.filter((e) => e.date >= t);
+  // Which clients have a job on each date, and the forecast keyed by date — for the rain flags.
+  const jobsByDate = {};
+  for (const e of allEvents) if (e.kind === "job") (jobsByDate[e.date] = jobsByDate[e.date] || []).push(e.name);
+  const wxByDate = Object.fromEntries((forecast || []).map((d) => [d.date, d]));
 
   // Changing a date on the calendar edits the real record (quote start date, lead visit, invoice due date).
   const moveEvent = (e, date, time) => {
@@ -341,8 +589,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       sub: names(newLeads, (l) => l.name) });
   }
   if (acceptedNoDate.length > 0) {
-    attention.push({ key: "nodate", icon: CalendarDays, tab: "quotes",
-      text: `${plural(acceptedNoDate.length, "accepted job")} with no start date`,
+    attention.push({ key: "nodate", icon: CalendarDays, onClick: () => setScheduleOpen(true),
+      text: `${plural(acceptedNoDate.length, "accepted job")} with no start date — tap to schedule ${acceptedNoDate.length === 1 ? "it" : "them"}`,
       sub: names(acceptedNoDate, (q) => q.clientName) });
   }
   if (staleQuotes.length > 0) {
@@ -399,7 +647,9 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         ))}
       </div>
 
-      <BoardCalendar events={allEvents} onMove={moveEvent} go={go} />
+      <WeatherPanel forecast={forecast} error={forecastError} jobsByDate={jobsByDate} onPushBack={() => setPushOpen(true)} />
+
+      <BoardCalendar events={allEvents} onMove={moveEvent} go={go} weather={wxByDate} />
 
       <div className="panel">
         <div className="panel-head">
@@ -441,7 +691,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           <div className="all-clear"><Check size={16} /> All clear — nothing needs chasing right now.</div>
         ) : (
           attention.map((a) => (
-            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => go(a.tab)}>
+            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => (a.onClick ? a.onClick() : go(a.tab))}>
               <a.icon size={16} />
               <div className="attention-main">
                 <div>{a.text}</div>
@@ -502,6 +752,36 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           </div>
         </div>
       </div>
+
+      {pushOpen && (
+        <PushBackModal
+          quotes={quotes}
+          forecast={forecast}
+          jobsByDate={jobsByDate}
+          onClose={() => setPushOpen(false)}
+          onApply={(list) => {
+            setQuotes((rows) => rows.map((r) => {
+              const a = list.find((x) => x.id === r.id);
+              return a ? { ...r, startDate: a.startDate } : r;
+            }));
+            setPushOpen(false);
+          }}
+        />
+      )}
+      {scheduleOpen && (
+        <ScheduleModal
+          quotes={quotes}
+          todo={acceptedNoDate}
+          onClose={() => setScheduleOpen(false)}
+          onApply={(assignments) => {
+            setQuotes((rows) => rows.map((r) => {
+              const a = assignments.find((x) => x.id === r.id);
+              return a ? { ...r, startDate: a.startDate } : r;
+            }));
+            setScheduleOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -509,6 +789,9 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 // ---------- Leads ----------
 function Leads({ leads, setLeads, go }) {
   const [modal, setModal] = useState(null); // {mode:'new'|'edit', data}
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const visibleLeads = leads.filter((l) => (!statusFilter || l.status === statusFilter) && matchesQuery(leadText(l), query));
 
   const save = (data) => {
     if (data.id) {
@@ -532,11 +815,21 @@ function Leads({ leads, setLeads, go }) {
         </button>
       </div>
 
+      {leads.length > 0 && (
+        <SearchBar value={query} onChange={setQuery} placeholder="Search leads — name, phone, address, notes…" shown={visibleLeads.length} total={leads.length}>
+          <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {LEAD_STATUSES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </SearchBar>
+      )}
       {leads.length === 0 ? (
         <EmptyState icon={Users} title="No leads yet" hint="Add an enquiry as soon as it comes in — by phone, form, or a mate's referral." onAdd={() => setModal({ mode: "new" })} addLabel="Add lead" />
+      ) : visibleLeads.length === 0 ? (
+        <p className="calc-note" style={{ textAlign: "center", padding: "24px 0" }}>No leads match "{query}"{statusFilter ? ` with status ${statusFilter}` : ""}.</p>
       ) : (
         <div className="list">
-          {leads.map((l) => (
+          {visibleLeads.map((l) => (
             <div className="row-card" key={l.id} onClick={() => setModal({ mode: "edit", data: l })}>
               <div className="row-card-main">
                 <div className="row-card-title">{l.name}</div>
@@ -729,6 +1022,9 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
   const [quickScanError, setQuickScanError] = useState("");
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const visibleQuotes = quotes.filter((q) => (!statusFilter || q.status === statusFilter) && matchesQuery(quoteText(q), query));
   const quickFileInputRef = useRef(null);
   const previewNumber = () => `LFS${settings?.nextDocNumber || 458}`;
 
@@ -919,11 +1215,21 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
         />
       )}
 
+      {quotes.length > 0 && (
+        <SearchBar value={query} onChange={setQuery} placeholder="Search quotes — name, number, address, amount, notes…" shown={visibleQuotes.length} total={quotes.length}>
+          <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {QUOTE_STATUSES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </SearchBar>
+      )}
       {quotes.length === 0 ? (
         <EmptyState icon={FileText} title="No quotes yet" hint="Build a quote once you know the scope of a job." onAdd={() => setModal({ mode: "new", data: { items: [], docNumber: previewNumber() } })} addLabel="Add quote" />
+      ) : visibleQuotes.length === 0 ? (
+        <p className="calc-note" style={{ textAlign: "center", padding: "24px 0" }}>No quotes match "{query}"{statusFilter ? ` with status ${statusFilter}` : ""}.</p>
       ) : (
         <div className="list">
-          {quotes.map((q) => (
+          {visibleQuotes.map((q) => (
             <div className="row-card" key={q.id} onClick={() => setModal({ mode: "edit", data: q })}>
               <div className="row-card-main">
                 <div className="row-card-title">{q.clientName || "Untitled"}</div>
@@ -947,6 +1253,7 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
           onDuplicate={modal.data?.id ? duplicate : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={saveAndCreateDeposit}
+          allQuotes={quotes}
           depositInvoice={modal.data?.id ? invoices.find((i) => i.quoteId === modal.data.id && isDepositInvoice(i)) : null}
         />
       )}
@@ -997,7 +1304,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice }) {
+function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [] }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -1011,8 +1318,48 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   const [linkCopied, setLinkCopied] = useState(false);
   const [linkFallback, setLinkFallback] = useState("");
   const fileInputRef = useRef(null);
+  const [autoPlaced, setAutoPlaced] = useState(false); // the start date was filled in automatically when set to Accepted
+  const [durUnit, setDurUnit] = useState("days");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItems = (updater) => setForm((f) => ({ ...f, items: typeof updater === "function" ? updater(f.items) : updater }));
+
+  // Setting a quote to Accepted with no start date drops it into the next free slot after your booked work.
+  // Nothing's locked in — change the date here, or move it on the Board calendar later.
+  const changeStatus = (next) => {
+    if (next === "Accepted" && !form.startDate) {
+      const me = { ...form, id: form.id || "__new__", status: "Accepted" };
+      // Only work that's actually booked in counts; undated accepted jobs are still waiting for you to review them.
+      const booked = allQuotes.filter((q) => q.id !== form.id && isIsoDate(q.startDate));
+      const p = suggestSchedule([...booked, me], today()).find((x) => x.quote.id === me.id);
+      if (p) {
+        setForm((f) => ({ ...f, status: next, startDate: p.start }));
+        setAutoPlaced(true);
+        return;
+      }
+    }
+    setForm((f) => ({ ...f, status: next }));
+  };
+
+  // How long the job will take, how that was worked out, and what you've typed over it.
+  const est = estimateHours(form);
+  const estWhy = (() => {
+    const bits = [];
+    const t = form.jobType;
+    if (est.source === "set") return "set by you";
+    if (est.source === "default") return "no length, gates or posts on the quote yet, so a half-day guess";
+    if (t === "Retaining wall") return `${est.lengthM}m × ${Number(form.fenceHeight) || 0}m wall, about 5 m² a day`;
+    if (t !== "Repairs" && t !== "Gates" && est.lengthM > 0) bits.push(`${est.lengthM}m at 10m per half day`);
+    if (est.gates > 0) bits.push(`${est.gates} gate${est.gates === 1 ? "" : "s"} × 2 hrs`);
+    else if (t === "Gates") bits.push("a gate job is about 2 hrs");
+    if (est.posts > 0) bits.push(`${est.posts} post${est.posts === 1 ? "" : "s"} × 30 mins`);
+    return bits.join(" + ");
+  })();
+  const typedShown = Number(form.durationHours) > 0 ? String(durUnit === "days" ? Number(form.durationHours) / HOURS_PER_DAY : Number(form.durationHours)) : "";
+  const setTyped = (v) => {
+    const n = Number(v);
+    set("durationHours", v === "" || !(n > 0) ? "" : String(Math.round((durUnit === "days" ? n * HOURS_PER_DAY : n) * 100) / 100));
+  };
+  const runDays = form.status === "Accepted" ? jobDays(form) : [];
 
   const handleFindSuburb = async () => {
     if (!form.address) return;
@@ -1131,7 +1478,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           </select>
         </Field>
         <Field label="Status">
-          <select value={form.status} onChange={(e) => set("status", e.target.value)}>
+          <select value={form.status} onChange={(e) => changeStatus(e.target.value)}>
             {QUOTE_STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
         </Field>
@@ -1140,7 +1487,14 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         <p className="calc-note">Digitally accepted by {form.acceptedByName} on {formatDateAU(form.acceptedAt)}.</p>
       )}
       {form.status === "Accepted" && (
-        <Field label="Job start date"><input type="date" value={form.startDate || ""} onChange={(e) => set("startDate", e.target.value)} /></Field>
+        <Field label="Job start date">
+          <input type="date" value={form.startDate || ""} onChange={(e) => { set("startDate", e.target.value); setAutoPlaced(false); }} />
+        </Field>
+      )}
+      {form.status === "Accepted" && autoPlaced && form.startDate && (
+        <p className="calc-note" style={{ marginTop: -6 }}>
+          <Clock size={12} style={{ verticalAlign: "-2px" }} /> Placed automatically in the next free slot ({formatDateAU(form.startDate)}). Change the date if you want it somewhere else.
+        </p>
       )}
       {form.status === "Accepted" && (
         <div className="deposit-prompt">
@@ -1180,6 +1534,35 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         <Field label="Fence height (m)"><input type="number" step="0.1" value={form.fenceHeight || ""} onChange={(e) => set("fenceHeight", e.target.value)} placeholder="e.g. 1.8" /></Field>
       </div>
       <Field label="Deposit (%)"><input type="number" value={form.depositPercent || ""} onChange={(e) => set("depositPercent", e.target.value)} style={{ maxWidth: 100 }} /></Field>
+
+      <div className="panel duration-box">
+        <div className="panel-head"><Clock size={16} /><span>Job time (for scheduling)</span></div>
+        <div className="duration-estimate">
+          <strong>{hoursLabel(est.hours)}</strong>
+          <span>{estWhy ? ` — ${estWhy}` : ""}</span>
+        </div>
+        <div className="field-pair" style={{ marginTop: 10 }}>
+          <Field label="Override the estimate (optional)">
+            <input type="number" min="0" step="0.25" value={typedShown} onChange={(e) => setTyped(e.target.value)} placeholder={durUnit === "days" ? String(est.hours / HOURS_PER_DAY) : String(est.hours)} />
+          </Field>
+          <Field label="In">
+            <select value={durUnit} onChange={(e) => setDurUnit(e.target.value)}>
+              <option value="days">days</option>
+              <option value="hours">hours</option>
+            </select>
+          </Field>
+        </div>
+        <label className="check-row">
+          <input type="checkbox" checked={worksSaturday(form)} onChange={(e) => set("workSaturday", e.target.checked ? "yes" : "")} />
+          <span>This job can run over a Saturday</span>
+        </label>
+        {runDays.length > 0 && (
+          <p className="calc-note" style={{ marginBottom: 0 }}>
+            Runs {runDays.length === 1 ? formatDateAU(runDays[0].date) : `${formatDateAU(runDays[0].date)} → ${formatDateAU(runDays[runDays.length - 1].date)}`}
+            {` (${runDays.length === 1 ? "1 day" : `${runDays.length} working days`})`}.
+          </p>
+        )}
+      </div>
 
       <Field label="Line items">
         <p className="calc-note">This is what the client sees and pays — "Insert job template" below uses your job length and fence height automatically.</p>
@@ -1326,6 +1709,10 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
   const markPaid = (inv) => setInvoices((is) => is.map((i) => (i.id === inv.id ? { ...i, status: "Paid", paidDate: today() } : i)));
 
   const effectiveStatus = (i) => (i.status === "Unpaid" && i.dueDate && i.dueDate < today() ? "Overdue" : i.status);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  // The Overdue filter matches what the list shows (an unpaid invoice past its due date), not just the stored status.
+  const visibleInvoices = invoices.filter((i) => (!statusFilter || effectiveStatus(i) === statusFilter) && matchesQuery(invoiceText(i), query));
 
   return (
     <div>
@@ -1339,11 +1726,21 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
         </button>
       </div>
 
+      {invoices.length > 0 && (
+        <SearchBar value={query} onChange={setQuery} placeholder="Search invoices — name, number, address, amount…" shown={visibleInvoices.length} total={invoices.length}>
+          <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {INVOICE_STATUSES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </SearchBar>
+      )}
       {invoices.length === 0 ? (
         <EmptyState icon={Receipt} title="No invoices yet" hint="Raise one directly, or convert an accepted quote from the Quotes tab." onAdd={() => setModal({ mode: "new", data: { items: [], status: "Unpaid", docNumber: previewNumber() } })} addLabel="Add invoice" />
+      ) : visibleInvoices.length === 0 ? (
+        <p className="calc-note" style={{ textAlign: "center", padding: "24px 0" }}>No invoices match "{query}"{statusFilter ? ` with status ${statusFilter}` : ""}.</p>
       ) : (
         <div className="list">
-          {invoices.map((i) => (
+          {visibleInvoices.map((i) => (
             <div className="row-card" key={i.id} onClick={() => setModal({ mode: "edit", data: i })}>
               <div className="row-card-main">
                 <div className="row-card-title">{i.clientName || "Untitled"}{isDepositInvoice(i) && <span className="doc-kind-badge">Deposit invoice</span>}</div>
@@ -2079,6 +2476,23 @@ export default function HubApp() {
   const [pendingNewFrom, setPendingNewFrom] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // Tables whose last save failed (lib/storage.js reports each save); cleared as soon as a later save works.
+  const [saveErrors, setSaveErrors] = useState({});
+  const [skippedCols, setSkippedCols] = useState({}); // saved, but these columns don't exist in the database yet
+  useEffect(() => {
+    const onSave = (e) => {
+      const { ok, table, message, skipped } = e.detail || {};
+      setSaveErrors((s) => {
+        const next = { ...s };
+        if (ok) delete next[table];
+        else next[table] = message || "unknown error";
+        return next;
+      });
+      if (ok) setSkippedCols((s) => ({ ...s, [table]: skipped || [] }));
+    };
+    window.addEventListener("hub-save", onSave);
+    return () => window.removeEventListener("hub-save", onSave);
+  }, []);
 
   const [leads, setLeads, leadsLoaded] = usePersistedList("lyons:leads");
   const [quotes, setQuotes, quotesLoaded] = usePersistedList("lyons:quotes");
@@ -2114,6 +2528,24 @@ export default function HubApp() {
       {!usingSupabase && (
         <div className="storage-banner">
           Running in local-only mode (no database connected) — data is saved in this browser only. Connect Supabase to sync properly.
+        </div>
+      )}
+      {Object.keys(saveErrors).length > 0 && (
+        <div className="save-error-banner" role="alert">
+          <AlertTriangle size={16} />
+          <span>
+            Your last change to {Object.keys(saveErrors).join(" and ")} did not save, so it will be lost if you close or reload this page.
+            <small>{Object.values(saveErrors)[0]}</small>
+          </span>
+        </div>
+      )}
+      {Object.values(skippedCols).flat().length > 0 && Object.keys(saveErrors).length === 0 && (
+        <div className="save-error-banner warn" role="status">
+          <AlertTriangle size={16} />
+          <span>
+            Saved, but your database needs a small update first, so {[...new Set(Object.values(skippedCols).flat())].join(", ")} {Object.values(skippedCols).flat().length === 1 ? "wasn't" : "weren't"} kept.
+            <small>Run the pending SQL update in Supabase (supabase/migration-6-job-duration.sql) and it'll save from then on.</small>
+          </span>
         </div>
       )}
       <header className="topbar">

@@ -33,9 +33,21 @@ export async function PUT(req, { params }) {
   const clean = rawRows.filter(Boolean).map((r) => sanitizeRow(table, r));
   if (clean.length === 0) return NextResponse.json({ error: "No rows to upsert" }, { status: 400 });
 
-  const { error } = await supabaseAdmin.from(table).upsert(clean);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  // If the app knows about a column the database doesn't have yet (code deployed before its SQL migration was
+  // run), save everything else rather than failing the whole save, and tell the app which columns were skipped.
+  let rows = clean;
+  const skipped = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { error } = await supabaseAdmin.from(table).upsert(rows);
+    if (!error) break;
+    const missing = /Could not find the '([^']+)' column/.exec(error.message || "")?.[1];
+    if (!missing || !TABLE_COLUMNS[table].includes(missing) || skipped.includes(missing)) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    skipped.push(missing);
+    rows = rows.map((r) => { const { [missing]: _drop, ...rest } = r; return rest; });
+  }
+  return NextResponse.json(skipped.length ? { ok: true, skippedColumns: skipped } : { ok: true });
 }
 
 export async function DELETE(req, { params }) {
