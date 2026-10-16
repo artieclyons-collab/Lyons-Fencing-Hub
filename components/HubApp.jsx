@@ -8,7 +8,7 @@ import {
   LayoutGrid, Users, FileText, Receipt, Boxes, Wallet,
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
-  ShoppingCart, Share2,
+  ShoppingCart, Share2, Copy, Hammer,
 } from "lucide-react";
 
 import {
@@ -22,6 +22,7 @@ import {
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
 import { lookupSuburb } from "@/lib/geocode";
+import { scheduleEvents, addDaysIso, FOLLOW_UP_DAYS } from "@/lib/schedule";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -111,60 +112,202 @@ function FenceHero() {
   );
 }
 
+const EVENT_KINDS = {
+  job: { icon: Hammer, cls: "kind-job" },
+  visit: { icon: MapPin, cls: "kind-visit" },
+  followup: { icon: Phone, cls: "kind-followup" },
+  invoice: { icon: Receipt, cls: "kind-invoice" },
+};
+
+// "09:30" -> "9:30am"
+const fmtTime = (hhmm) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""}${h < 12 ? "am" : "pm"}`;
+};
+
+function dayHeading(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  const short = d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  if (iso === today()) return { main: "Today", sub: short, isToday: true };
+  if (iso === addDaysIso(today(), 1)) return { main: "Tomorrow", sub: short };
+  return { main: d.toLocaleDateString("en-AU", { weekday: "long" }), sub: short };
+}
+
 function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
-  const activeLeads = leads.filter((l) => !["Won", "Lost"].includes(l.status));
-  const pendingQuotes = quotes.filter((q) => q.status === "Sent" || q.status === "Draft");
-  const pendingValue = pendingQuotes.reduce((s, q) => s + itemsTotal(q.items), 0);
-  const unpaidInvoices = invoices.filter((i) => i.status !== "Paid");
-  const unpaidValue = unpaidInvoices.reduce((s, i) => s + itemsTotal(i.items), 0);
-  const overdue = invoices.filter((i) => i.status === "Unpaid" && i.dueDate && i.dueDate < today());
-  const lowStock = materials.filter((m) => Number(m.reorderLevel) > 0 && Number(m.qtyOnHand) <= Number(m.reorderLevel));
-  const upcomingJobs = quotes
-    .filter((q) => q.status === "Accepted" && q.startDate)
-    .sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const acceptedNoDate = quotes.filter((q) => q.status === "Accepted" && !q.startDate);
+  const t = today();
+  const inc = (items) => gstBreakdown(itemsTotal(items)).total;
+  const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
+  const whole = (n) => money(Math.round(n)).replace(/\.00$/, "");
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const daysSince = (dateStr) => {
     if (!dateStr) return 0;
     const then = new Date(dateStr + "T00:00:00");
     return Math.floor((new Date().setHours(0, 0, 0, 0) - then.setHours(0, 0, 0, 0)) / 86400000);
   };
-  const needsFollowUp = quotes
-    .filter((q) => q.status === "Sent" && daysSince(q.date) >= 3)
-    .sort((a, b) => daysSince(b.date) - daysSince(a.date));
 
+  const newLeads = leads.filter((l) => l.status === "New");
+  const activeLeads = leads.filter((l) => !["Won", "Lost"].includes(l.status));
+  const quotesOut = quotes.filter((q) => q.status === "Sent");
+  const bookedJobs = quotes.filter((q) => q.status === "Accepted" && q.startDate && q.startDate >= t);
+  const unpaidInvoices = invoices.filter((i) => i.status !== "Paid");
+  const overdue = unpaidInvoices.filter((i) => i.dueDate && i.dueDate < t);
+  const owed = sum(unpaidInvoices, (i) => inc(i.items));
+  const lowStock = materials.filter((m) => Number(m.reorderLevel) > 0 && Number(m.qtyOnHand) <= Number(m.reorderLevel));
+  // Accepted but no start date — ignoring jobs that already have an invoice raised (those are underway or done).
+  const acceptedNoDate = quotes.filter((q) => q.status === "Accepted" && !q.startDate && !invoices.some((i) => i.quoteId === q.id));
+  // Follow-ups are worth chasing for about a month; anything older is probably dead and just clutters the list.
+  const needsFollowUp = quotes
+    .filter((q) => q.status === "Sent" && daysSince(q.date) >= FOLLOW_UP_DAYS && daysSince(q.date) <= 30)
+    .sort((a, b) => daysSince(b.date) - daysSince(a.date));
+  const staleQuotes = quotes.filter((q) => q.status === "Sent" && daysSince(q.date) > 30);
+
+  // ----- schedule: next 2 weeks by day, plus the next few far-off jobs/visits -----
+  const upcoming = scheduleEvents({ leads, quotes, invoices }).filter((e) => e.date >= t);
+  const soonLimit = addDaysIso(t, 14);
+  const soon = upcoming.filter((e) => e.date <= soonLimit);
+  const later = upcoming.filter((e) => e.date > soonLimit && (e.kind === "job" || e.kind === "visit")).slice(0, 3);
+  const days = [];
+  for (const e of soon) {
+    const last = days[days.length - 1];
+    if (last && last.date === e.date) last.events.push(e);
+    else days.push({ date: e.date, events: [e] });
+  }
+  const todayCount = soon.filter((e) => e.date === t).length;
+
+  // ----- money this month -----
   const thisMonth = new Date().toISOString().slice(0, 7);
   // Income inc. GST, to match expenses (logged as the GST-inclusive receipt amount) — otherwise "Net" compares apples to oranges.
-  const monthIncome = invoices
-    .filter((i) => i.status === "Paid" && (i.paidDate || i.issuedDate || "").slice(0, 7) === thisMonth)
-    .reduce((s, i) => s + gstBreakdown(itemsTotal(i.items)).total, 0);
-  const monthExpense = expenses
-    .filter((e) => (e.date || "").slice(0, 7) === thisMonth)
-    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const monthIncome = sum(
+    invoices.filter((i) => i.status === "Paid" && (i.paidDate || i.issuedDate || "").slice(0, 7) === thisMonth),
+    (i) => inc(i.items)
+  );
+  const monthExpense = sum(expenses.filter((e) => (e.date || "").slice(0, 7) === thisMonth), (e) => Number(e.amount || 0));
+
+  const phoneLeads = newLeads.filter((l) => l.source === "phone_agent").length;
+  const names = (list, get) => {
+    const shown = list.slice(0, 3).map(get).join(", ");
+    return list.length > 3 ? `${shown} +${list.length - 3} more` : shown;
+  };
+  const attention = [];
+  if (overdue.length > 0) {
+    attention.push({ key: "overdue", bad: true, icon: AlertTriangle, tab: "invoices",
+      text: `${plural(overdue.length, "overdue invoice")} — ${whole(sum(overdue, (i) => inc(i.items)))} to chase`,
+      sub: names(overdue, (i) => i.clientName) });
+  }
+  if (newLeads.length > 0) {
+    attention.push({ key: "leads", icon: Users, tab: "leads",
+      text: `${plural(newLeads.length, "new lead")} to contact${phoneLeads ? ` (${phoneLeads} from the phone agent)` : ""}`,
+      sub: names(newLeads, (l) => l.name) });
+  }
+  if (acceptedNoDate.length > 0) {
+    attention.push({ key: "nodate", icon: CalendarDays, tab: "quotes",
+      text: `${plural(acceptedNoDate.length, "accepted job")} with no start date`,
+      sub: names(acceptedNoDate, (q) => q.clientName) });
+  }
+  if (staleQuotes.length > 0) {
+    attention.push({ key: "stale", icon: FileText, tab: "quotes",
+      text: `${plural(staleQuotes.length, "quote")} sent over a month ago with no answer`,
+      sub: `Mark them Declined if they're dead — ${names(staleQuotes, (q) => q.clientName)}` });
+  }
+  if (lowStock.length > 0) {
+    attention.push({ key: "stock", icon: Boxes, tab: "materials",
+      text: `${plural(lowStock.length, "material")} at or below reorder level`,
+      sub: names(lowStock, (m) => m.name) });
+  }
 
   const cards = [
-    { label: "Active leads", value: activeLeads.length, sub: `${leads.length} total`, icon: Users, tab: "leads" },
-    { label: "Quotes pending", value: pendingQuotes.length, sub: money(pendingValue), icon: FileText, tab: "quotes" },
-    { label: "Unpaid invoices", value: unpaidInvoices.length, sub: money(unpaidValue), icon: Receipt, tab: "invoices", warn: overdue.length > 0 },
-    { label: "Materials", value: materials.length, sub: materials.length === 1 ? "priced item" : "priced items", icon: Boxes, tab: "materials" },
+    { label: "New leads", value: newLeads.length, sub: `${activeLeads.length} active`, icon: Users, tab: "leads", tone: "timber" },
+    { label: "Quotes out", value: quotesOut.length, sub: `${whole(sum(quotesOut, (q) => inc(q.items)))} inc. GST`, icon: FileText, tab: "quotes", tone: "steel" },
+    { label: "Booked jobs", value: bookedJobs.length, sub: `${whole(sum(bookedJobs, (q) => inc(q.items)))} inc. GST`, icon: Hammer, tab: "quotes", tone: "hivis" },
+    { label: "Owed to you", value: whole(owed), sub: plural(unpaidInvoices.length, "unpaid invoice"), icon: Receipt, tab: "invoices", tone: "good", warn: overdue.length > 0 },
   ];
+
+  const EventRow = ({ e, showDate }) => {
+    const k = EVENT_KINDS[e.kind];
+    return (
+      <div className={`event-row ${k.cls}`} onClick={() => go(e.tab)}>
+        <div className="event-icon"><k.icon size={16} /></div>
+        <div className="event-main">
+          <div className="event-title">{e.name}</div>
+          <div className="event-sub">{e.label}{showDate ? ` · ${formatDateAU(e.date)}` : ""}{e.subtitle ? ` · ${e.subtitle}` : ""}</div>
+        </div>
+        {e.time && <div className="event-time">{fmtTime(e.time)}</div>}
+      </div>
+    );
+  };
 
   return (
     <div>
-      <FenceHero />
-      <div className="section-head">
-        <h1>Job board</h1>
-        <p>Everything moving through Lyons Fencing & Services right now.</p>
+      <div className="board-hello">
+        <div className="board-hello-title">{"G'day, Artie"}</div>
+        <div className="board-hello-date">
+          {new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" })}
+          {todayCount > 0 ? ` · ${todayCount} on today` : ""}
+        </div>
       </div>
+      <FenceHero />
 
       <div className="card-grid">
         {cards.map((c) => (
-          <button key={c.label} className={`stat-card${c.warn ? " warn" : ""}`} onClick={() => go(c.tab)}>
-            <c.icon size={20} />
+          <button key={c.label} className={`stat-card tone-${c.tone}${c.warn ? " warn" : ""}`} onClick={() => go(c.tab)}>
+            <div className="stat-icon"><c.icon size={18} /></div>
             <div className="stat-value">{c.value}</div>
             <div className="stat-label">{c.label}</div>
             <div className="stat-sub">{c.sub}</div>
           </button>
         ))}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <CalendarDays size={16} />
+          <span>Coming up — next 2 weeks</span>
+        </div>
+        {days.length === 0 ? (
+          <p className="calc-note" style={{ margin: 0 }}>
+            Nothing scheduled. Set a job start date on an accepted quote, or a site visit date on a lead, and it shows up here (and in your iPhone calendar).
+          </p>
+        ) : (
+          days.map((day) => {
+            const h = dayHeading(day.date);
+            return (
+              <div key={day.date}>
+                <div className={`day-label${h.isToday ? " today" : ""}`}>
+                  <strong>{h.main}</strong>
+                  <span>{h.sub}</span>
+                </div>
+                {day.events.map((e) => <EventRow key={e.uid} e={e} />)}
+              </div>
+            );
+          })
+        )}
+        {later.length > 0 && (
+          <div>
+            <div className="day-label"><strong>Later</strong></div>
+            {later.map((e) => <EventRow key={e.uid} e={e} showDate />)}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <AlertTriangle size={16} />
+          <span>Needs your attention</span>
+        </div>
+        {attention.length === 0 ? (
+          <div className="all-clear"><Check size={16} /> All clear — nothing needs chasing right now.</div>
+        ) : (
+          attention.map((a) => (
+            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => go(a.tab)}>
+              <a.icon size={16} />
+              <div className="attention-main">
+                <div>{a.text}</div>
+                {a.sub && <div className="attention-sub">{a.sub}</div>}
+              </div>
+              <ChevronRight size={16} />
+            </div>
+          ))
+        )}
       </div>
 
       {needsFollowUp.length > 0 && (
@@ -181,7 +324,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
                 <div className="upcoming-date">{daysSince(q.date)}d</div>
                 <div style={{ flex: 1 }}>
                   <div className="upcoming-name">{q.clientName}</div>
-                  <div className="upcoming-sub">{q.jobType} · {money(gstBreakdown(itemsTotal(q.items)).total)} inc. GST</div>
+                  <div className="upcoming-sub">{q.jobType} · {money(inc(q.items))} inc. GST</div>
                 </div>
                 {q.clientPhone ? (
                   <a className="btn-ghost small" href={`sms:${q.clientPhone}?body=${encodeURIComponent(body)}`}>Draft text</a>
@@ -191,29 +334,6 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {(upcomingJobs.length > 0 || acceptedNoDate.length > 0) && (
-        <div className="panel">
-          <div className="panel-head">
-            <CalendarDays size={16} />
-            <span>Upcoming jobs</span>
-          </div>
-          {upcomingJobs.map((q) => (
-            <div key={q.id} className="upcoming-row" onClick={() => go("quotes")}>
-              <div className="upcoming-date">{formatDateAU(q.startDate)}</div>
-              <div>
-                <div className="upcoming-name">{q.clientName}</div>
-                <div className="upcoming-sub">{q.jobType} {q.suburb ? `· ${q.suburb}` : ""} · {money(gstBreakdown(itemsTotal(q.items)).total)} inc. GST</div>
-              </div>
-            </div>
-          ))}
-          {acceptedNoDate.length > 0 && (
-            <p className="calc-note" style={{ marginTop: upcomingJobs.length ? 10 : 0 }}>
-              {acceptedNoDate.length} more accepted with no start date yet ({acceptedNoDate.map((q) => q.clientName).join(", ")}) — set one on the quote when you know it.
-            </p>
-          )}
         </div>
       )}
 
@@ -239,21 +359,6 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
           </div>
         </div>
       </div>
-
-      {overdue.length > 0 && (
-        <div className="alert-strip" onClick={() => go("invoices")}>
-          <AlertTriangle size={16} />
-          <span>{overdue.length} invoice{overdue.length > 1 ? "s" : ""} overdue — tap to review</span>
-          <ChevronRight size={16} />
-        </div>
-      )}
-      {lowStock.length > 0 && (
-        <div className="alert-strip" onClick={() => go("materials")}>
-          <Boxes size={16} />
-          <span>{lowStock.length} material{lowStock.length > 1 ? "s" : ""} at or below reorder level</span>
-          <ChevronRight size={16} />
-        </div>
-      )}
     </div>
   );
 }
@@ -408,6 +513,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
     length: prefill?.length_m ?? "",
     height: prefill?.height_m ?? "1.8",
     gates: prefill?.gates ?? "0",
+    gateWidth: "1",
     postSpacing: "",
     panelWidth: "",
   });
@@ -444,6 +550,11 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
         <Field label="Height (m)"><input type="number" step="0.1" value={form.height} onChange={(e) => set("height", e.target.value)} /></Field>
         <Field label="Gates"><input type="number" value={form.gates} onChange={(e) => set("gates", e.target.value)} /></Field>
       </div>
+      {form.style === "timber" && Number(form.gates) > 0 && (
+        <Field label="Gate width (m) — palings for each gate are added to its cost">
+          <input type="number" step="0.1" value={form.gateWidth} onChange={(e) => set("gateWidth", e.target.value)} style={{ maxWidth: 120 }} />
+        </Field>
+      )}
       <div className="field-pair">
         <Field label="Bay width (m)"><input type="number" step="0.01" value={form.panelWidth} onChange={(e) => set("panelWidth", e.target.value)} placeholder={form.style === "colorbond" ? "2.365" : "2.4"} /></Field>
         <Field label="Post spacing (m)"><input type="number" step="0.01" value={form.postSpacing} onChange={(e) => set("postSpacing", e.target.value)} placeholder="same as bay width" /></Field>
@@ -500,11 +611,32 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
     if (data.id) setQuotes((qs) => qs.map((q) => (q.id === data.id ? data : q)));
     else {
       bumpDocNumber();
-      setQuotes((qs) => [{ ...data, id: uid(), date: today() }, ...qs]);
+      setQuotes((qs) => [{ ...data, id: uid(), date: data.date || today() }, ...qs]);
     }
     setModal(null);
   };
   const remove = (id) => setQuotes((qs) => qs.filter((q) => q.id !== id));
+
+  // Opens a fresh, unsaved copy of a quote (what's on screen, including any edits) so a
+  // second similar quote for the same client doesn't mean starting from scratch.
+  const duplicate = (q) => {
+    const { id: _id, inserted_at: _ins, ...rest } = q;
+    setModal({
+      mode: "new",
+      dupKey: Date.now(), // forces the form to reload with the copy instead of reusing the old one
+      data: {
+        ...rest,
+        docNumber: previewNumber(),
+        status: "Draft",
+        date: today(),
+        startDate: "",
+        acceptedAt: null,
+        acceptedByName: null,
+        items: (q.items || []).map((it) => ({ ...it, id: uid() })),
+        materialsBreakdown: (q.materialsBreakdown || []).map((it) => ({ ...it, id: uid() })),
+      },
+    });
+  };
 
   const openFinalInvoice = (q) => {
     setModal(null);
@@ -644,12 +776,14 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
 
       {modal && (
         <QuoteModal
+          key={modal.data?.id || `new-${modal.dupKey || 0}`}
           initial={modal.data}
           settings={settings}
           materials={materials}
           onClose={() => setModal(null)}
           onSave={save}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
+          onDuplicate={modal.data?.id ? duplicate : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={modal.data?.id && modal.data.status === "Accepted" ? () => createDepositInvoice(modal.data) : null}
         />
@@ -701,8 +835,8 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onFinalInvoice, onCreateDeposit }) {
-  const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
+function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit }) {
+  const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [scanPrefill, setScanPrefill] = useState(null);
@@ -827,6 +961,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
       <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
+      <Field label="Quote date (the quote is valid for 3 months from this date)"><input type="date" value={form.date || ""} onChange={(e) => set("date", e.target.value)} style={{ maxWidth: 200 }} /></Field>
       <div className="field-pair">
         <Field label="Job type">
           <select value={form.jobType} onChange={(e) => set("jobType", e.target.value)}>
@@ -974,6 +1109,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
 
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
+        {onDuplicate && <button className="btn-ghost" onClick={() => onDuplicate(form)}><Copy size={15} /> Duplicate</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         {onCreateDeposit && <button className="btn-ghost" onClick={onCreateDeposit}><Receipt size={15} /> Create deposit invoice</button>}
