@@ -18,6 +18,7 @@ import {
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
   buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, templateMaterialsCost, estFuelCost,
+  isDepositInvoice, DEPOSIT_DUE_NOTE,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
@@ -133,7 +134,138 @@ function dayHeading(iso) {
   return { main: d.toLocaleDateString("en-AU", { weekday: "long" }), sub: short };
 }
 
-function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
+// Month calendar for the Board. Shows everything from lib/schedule.js (the same list the iPhone calendar
+// feed uses); tap a day to see it, and change a job / visit / invoice date right there.
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function monthCells(ym) {
+  const first = `${ym}-01`;
+  const [y, m] = ym.split("-").map(Number);
+  const offset = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7; // Monday first
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const rows = Math.ceil((offset + daysInMonth) / 7);
+  return Array.from({ length: rows * 7 }, (_, i) => {
+    const date = addDaysIso(first, i - offset);
+    return { date, inMonth: date.slice(0, 7) === ym, day: Number(date.slice(8)) };
+  });
+}
+
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function BoardCalendar({ events, onMove, go }) {
+  const t = today();
+  const [month, setMonth] = useState(t.slice(0, 7));
+  const [selected, setSelected] = useState(t);
+  const [editing, setEditing] = useState(null); // uid of the event whose date is being changed
+
+  const byDate = useMemo(() => {
+    const map = {};
+    for (const e of events) (map[e.date] = map[e.date] || []).push(e);
+    return map;
+  }, [events]);
+  const cells = monthCells(month);
+  const dayEvents = byDate[selected] || [];
+  const monthLabel = new Date(`${month}-01T00:00:00`).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+  const selLabel = new Date(`${selected}T00:00:00`).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+
+  const pick = (date) => {
+    setSelected(date);
+    setEditing(null);
+    if (date.slice(0, 7) !== month) setMonth(date.slice(0, 7));
+  };
+  const move = (e, date, time) => {
+    onMove(e, date, time);
+    if (date && date !== e.date) pick(date);
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <CalendarDays size={16} />
+        <span>Calendar</span>
+      </div>
+      <div className="cal-nav">
+        <button className="icon-btn cal-nav-btn" onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month"><ChevronRight size={18} style={{ transform: "rotate(180deg)" }} /></button>
+        <div className="cal-month">{monthLabel}</div>
+        <button className="btn-ghost small" onClick={() => pick(t)}>Today</button>
+        <button className="icon-btn cal-nav-btn" onClick={() => setMonth(shiftMonth(month, 1))} aria-label="Next month"><ChevronRight size={18} /></button>
+      </div>
+      <div className="cal-grid">
+        {WEEKDAYS.map((d) => <div key={d} className="cal-dow">{d}</div>)}
+        {cells.map((c) => {
+          const evs = byDate[c.date] || [];
+          return (
+            <button
+              key={c.date}
+              className={`cal-cell${c.inMonth ? "" : " out"}${c.date === t ? " is-today" : ""}${c.date === selected ? " is-selected" : ""}`}
+              onClick={() => pick(c.date)}
+            >
+              <span className="cal-day">{c.day}</span>
+              <span className="cal-dots">
+                {evs.slice(0, 4).map((e) => <span key={e.uid} className={`cal-dot ${EVENT_KINDS[e.kind].cls}`} />)}
+              </span>
+              <span className="cal-chips">
+                {evs.slice(0, 2).map((e) => <span key={e.uid} className={`cal-chip ${EVENT_KINDS[e.kind].cls}`}>{e.name}</span>)}
+                {evs.length > 2 && <span className="cal-more">+{evs.length - 2} more</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="cal-legend">
+        <span><i className="cal-dot kind-job" /> Job start</span>
+        <span><i className="cal-dot kind-visit" /> Site visit</span>
+        <span><i className="cal-dot kind-followup" /> Follow-up</span>
+        <span><i className="cal-dot kind-invoice" /> Invoice due</span>
+      </div>
+
+      <div className="day-label" style={{ marginTop: 14 }}>
+        <strong>{selected === t ? "Today" : selLabel}</strong>
+        {selected === t && <span>{selLabel}</span>}
+      </div>
+      {dayEvents.length === 0 ? (
+        <p className="calc-note" style={{ margin: 0 }}>Nothing on this day.</p>
+      ) : (
+        dayEvents.map((e) => {
+          const k = EVENT_KINDS[e.kind];
+          return (
+            <div key={e.uid} className={`event-card ${k.cls}`}>
+              <div className="event-row-plain" onClick={() => go(e.tab)}>
+                <div className="event-icon"><k.icon size={16} /></div>
+                <div className="event-main">
+                  <div className="event-title">{e.name}</div>
+                  <div className="event-sub">{e.label}{e.subtitle ? ` · ${e.subtitle}` : ""}</div>
+                </div>
+                {e.time && <div className="event-time">{fmtTime(e.time)}</div>}
+              </div>
+              {e.ref ? (
+                editing === e.uid ? (
+                  <div className="event-edit">
+                    <input type="date" value={e.date} onChange={(ev) => ev.target.value && move(e, ev.target.value, e.time)} />
+                    {e.ref.timeField && (
+                      <input type="time" value={e.time || ""} onChange={(ev) => move(e, e.date, ev.target.value)} />
+                    )}
+                    <button className="btn-ghost small" onClick={() => setEditing(null)}>Done</button>
+                  </div>
+                ) : (
+                  <button className="btn-ghost small event-change" onClick={() => setEditing(e.uid)}>Change date{e.ref.timeField ? " / time" : ""}</button>
+                )
+              ) : (
+                <div className="event-note">Follows 3 days after the quote was sent.</div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads, setQuotes, setInvoices }) {
   const t = today();
   const inc = (items) => gstBreakdown(itemsTotal(items)).total;
   const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
@@ -162,7 +294,16 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
   const staleQuotes = quotes.filter((q) => q.status === "Sent" && daysSince(q.date) > 30);
 
   // ----- schedule: next 2 weeks by day, plus the next few far-off jobs/visits -----
-  const upcoming = scheduleEvents({ leads, quotes, invoices }).filter((e) => e.date >= t);
+  const allEvents = scheduleEvents({ leads, quotes, invoices });
+  const upcoming = allEvents.filter((e) => e.date >= t);
+
+  // Changing a date on the calendar edits the real record (quote start date, lead visit, invoice due date).
+  const moveEvent = (e, date, time) => {
+    const setRows = { quotes: setQuotes, leads: setLeads, invoices: setInvoices }[e.ref.table];
+    const patch = { [e.ref.field]: date };
+    if (e.ref.timeField) patch[e.ref.timeField] = time || "";
+    setRows((rows) => rows.map((r) => (r.id === e.ref.id ? { ...r, ...patch } : r)));
+  };
   const soonLimit = addDaysIso(t, 14);
   const soon = upcoming.filter((e) => e.date <= soonLimit);
   const later = upcoming.filter((e) => e.date > soonLimit && (e.kind === "job" || e.kind === "visit")).slice(0, 3);
@@ -257,6 +398,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go }) {
           </button>
         ))}
       </div>
+
+      <BoardCalendar events={allEvents} onMove={moveEvent} go={go} />
 
       <div className="panel">
         <div className="panel-head">
@@ -580,7 +723,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
 }
 
 // ---------- Quotes ----------
-function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber }) {
+function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber, go }) {
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
@@ -643,6 +786,22 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
     setFinalInvoiceQuote(q);
   };
 
+  // "Create deposit invoice" straight from the open quote: saves the quote as it's currently
+  // filled in (so the invoice matches what's on screen), then raises the deposit invoice.
+  const saveAndCreateDeposit = (form) => {
+    const isNew = !form.id;
+    const quote = { ...form, id: form.id || uid(), date: form.date || today() };
+    // A brand-new quote takes the next number itself, so the invoice gets the one after it.
+    const invoiceNumber = isNew ? `LFS${(Number(settings?.nextDocNumber) || 458) + 1}` : previewNumber();
+    if (isNew) {
+      bumpDocNumber();
+      setQuotes((qs) => [quote, ...qs]);
+    } else {
+      setQuotes((qs) => qs.map((q) => (q.id === quote.id ? quote : q)));
+    }
+    createDepositInvoice(quote, invoiceNumber);
+  };
+
   // Bills the full scope of works, minus anything already paid toward the job
   // (a deposit invoice you raised, or an amount you took outside the app —
   // either way it's entered on the Final invoice modal). If nothing's been
@@ -682,8 +841,8 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
 
   // Bills just the deposit — the ex-GST line amount works out so that once GST is
   // added back on, the invoice total lands exactly on the deposit % of the full job.
-  const createDepositInvoice = (q) => {
-    const docNumber = previewNumber();
+  // `docNumber` is passed in when the quote was only just created (it took the next number itself).
+  const createDepositInvoice = (q, docNumber = previewNumber()) => {
     bumpDocNumber();
     const depositPct = Number(q.depositPercent) || 10;
     const exGstAmount = itemsTotal(q.items) * (depositPct / 100);
@@ -703,12 +862,14 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
       }],
       status: "Unpaid",
       issuedDate: today(),
-      dueDate: "",
-      notes: `Balance due within 14 days of completion, per quote ${q.docNumber || ""}.`,
+      // A deposit is due before the job starts: the day before the start date, or today if that's already passed.
+      dueDate: q.startDate ? (addDaysIso(q.startDate, -1) < today() ? today() : addDaysIso(q.startDate, -1)) : "",
+      notes: `${DEPOSIT_DUE_NOTE}, per quote ${q.docNumber || ""}.`,
       quoteId: q.id,
     };
     setInvoices((is) => [inv, ...is]);
     setModal(null);
+    go?.("invoices");
   };
 
   const handleQuickScan = async (e) => {
@@ -785,7 +946,8 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onDuplicate={modal.data?.id ? duplicate : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
-          onCreateDeposit={modal.data?.id && modal.data.status === "Accepted" ? () => createDepositInvoice(modal.data) : null}
+          onCreateDeposit={saveAndCreateDeposit}
+          depositInvoice={modal.data?.id ? invoices.find((i) => i.quoteId === modal.data.id && isDepositInvoice(i)) : null}
         />
       )}
       {finalInvoiceQuote && (
@@ -835,7 +997,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit }) {
+function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -980,6 +1142,29 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       {form.status === "Accepted" && (
         <Field label="Job start date"><input type="date" value={form.startDate || ""} onChange={(e) => set("startDate", e.target.value)} /></Field>
       )}
+      {form.status === "Accepted" && (
+        <div className="deposit-prompt">
+          {depositInvoice ? (
+            <div className="deposit-prompt-text">
+              <Check size={16} /> Deposit invoice {depositInvoice.docNumber} is already raised ({depositInvoice.status.toLowerCase()}).
+            </div>
+          ) : (
+            <>
+              <div className="deposit-prompt-text">
+                <Receipt size={16} />
+                <span>
+                  Accepted — raise the deposit invoice now?{" "}
+                  <strong>{money(gstBreakdown(itemsTotal(form.items) * ((Number(form.depositPercent) || 10) / 100)).total)} inc. GST</strong>
+                  {" "}({Number(form.depositPercent) || 10}%), due before the job starts. This saves the quote as it is first.
+                </span>
+              </div>
+              <button type="button" className="btn-primary" onClick={() => onCreateDeposit(form)} disabled={!form.clientName || form.items.length === 0}>
+                <Receipt size={15} /> Create deposit invoice
+              </button>
+            </>
+          )}
+        </div>
+      )}
       <Field label="Street address">
         <div className="calc-trigger-row">
           <input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" style={{ flex: 1 }} />
@@ -1112,7 +1297,6 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         {onDuplicate && <button className="btn-ghost" onClick={() => onDuplicate(form)}><Copy size={15} /> Duplicate</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
-        {onCreateDeposit && <button className="btn-ghost" onClick={onCreateDeposit}><Receipt size={15} /> Create deposit invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
@@ -1162,7 +1346,7 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
           {invoices.map((i) => (
             <div className="row-card" key={i.id} onClick={() => setModal({ mode: "edit", data: i })}>
               <div className="row-card-main">
-                <div className="row-card-title">{i.clientName || "Untitled"}</div>
+                <div className="row-card-title">{i.clientName || "Untitled"}{isDepositInvoice(i) && <span className="doc-kind-badge">Deposit invoice</span>}</div>
                 <div className="row-card-meta">{money(itemsTotal(i.items))} + GST = {money(gstBreakdown(itemsTotal(i.items)).total)} · issued {i.issuedDate}{i.dueDate ? ` · due ${i.dueDate}` : ""}</div>
               </div>
               <Tag label={effectiveStatus(i)} />
@@ -1208,7 +1392,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
   };
 
   return (
-    <Modal title={initial?.id ? "Edit invoice" : "New invoice"} onClose={onClose}>
+    <Modal title={`${initial?.id ? "Edit" : "New"} ${isDepositInvoice(form) ? "deposit invoice" : "invoice"}`} onClose={onClose}>
       <div className="field-pair">
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
@@ -1959,10 +2143,10 @@ export default function HubApp() {
           <div className="loading">Loading your data…</div>
         ) : (
           <>
-            {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} />}
+            {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
             {tab === "leads" && <Leads leads={leads} setLeads={setLeads} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} />}
+            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
