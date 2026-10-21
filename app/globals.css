@@ -399,6 +399,7 @@ html, body{ margin:0; padding:0; background:var(--bg); }
 .vp-leg{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); padding:6px 0 6px 10px; }
 .vp-stop{ display:flex; gap:12px; padding:10px 12px; background:var(--surface2); border:1px solid var(--line); border-left:3px solid var(--hivis); border-radius:8px; }
 .vp-stop.late{ border-left-color:var(--bad); }
+.vp-stop.vp-mid{ border-left-color:var(--timber, #8a6a3b); }
 .vp-time{ display:flex; flex-direction:column; min-width:64px; }
 .vp-time strong{ font-family:'Barlow Condensed',sans-serif; font-size:20px; color:var(--hivis); line-height:1.1; }
 .vp-time span{ font-size:12px; color:var(--text-dim); }

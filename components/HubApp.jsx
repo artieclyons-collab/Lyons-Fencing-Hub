@@ -30,7 +30,7 @@ import {
 } from "@/lib/jobSchedule";
 import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
-import { collectVisits } from "@/lib/visitData";
+import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
 import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint } from "@/lib/availability";
@@ -2590,9 +2590,12 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   const t = today();
   const { confirmed, flexible, left } = useMemo(() => collectVisits(leads, quotes, t), [leads, quotes, t]);
   const allStops = useMemo(() => [...confirmed, ...flexible], [confirmed, flexible]);
+  // Days you're on a job: the plan starts from the job site when work finishes. Home and the job sites also need finding on the map.
+  const jobs = useMemo(() => collectJobDays(quotes, t), [quotes, t]);
+  const locStops = useMemo(() => [...allStops, { id: HOME.id, query: HOME.query }, ...jobs.map((j) => ({ id: j.id, query: j.query }))], [allStops, jobs]);
 
   // What you've chosen (kept on this device): which view, per-day start settings, locked times, visit lengths.
-  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
+  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, midday: {}, workStart: WORK_START, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
   useEffect(() => writeLS(PLAN_KEY, saved), [saved]);
   const patchSaved = (patch) => setSaved((s) => ({ ...s, ...patch }));
 
@@ -2600,9 +2603,9 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   const [coords, setCoords] = useState(() => readLS(GEO_KEY, {})); // address text -> { lat, lon } | false (not found)
   const [geo, setGeo] = useState({ running: false, done: 0, total: 0 });
   const [retry, setRetry] = useState(0);
-  const queryKey = allStops.map((s) => s.query).join("|");
+  const queryKey = locStops.map((s) => s.query).join("|");
   useEffect(() => {
-    const todo = [...new Set(allStops.map((s) => s.query))].filter((q) => coords[q] === undefined);
+    const todo = [...new Set(locStops.map((s) => s.query))].filter((q) => coords[q] === undefined);
     if (todo.length === 0) return undefined;
     let cancelled = false;
     (async () => {
@@ -2633,7 +2636,7 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   }, [queryKey, retry]);
 
   // ----- 2) real driving times between everything -----
-  const { nodes, index } = useMemo(() => buildNodes(allStops, coords), [allStops, coords]);
+  const { nodes, index } = useMemo(() => buildNodes(locStops, coords), [locStops, coords]);
   const nodeKey = nodes.map((n) => `${n.lat.toFixed(4)},${n.lon.toFixed(4)}`).join(";");
   const [matrix, setMatrix] = useState(null); // { key, minutesRaw, source }
   const [matrixError, setMatrixError] = useState("");
@@ -2656,10 +2659,10 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   // ----- 3) the plan -----
   const planned = useMemo(() => {
     if (!matrix || matrix.key !== nodeKey) return null;
-    return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves });
-  }, [matrix, nodeKey, confirmed, flexible, coords, index, saved.overrides, saved.locks, saved.durations, saved.moves]);
+    return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves, midday: saved.midday, jobs, workStart: saved.workStart, today: t });
+  }, [matrix, nodeKey, confirmed, flexible, coords, index, jobs, t, saved.overrides, saved.locks, saved.durations, saved.moves, saved.midday, saved.workStart]);
 
-  const planDates = planned ? Object.keys(planned.days).filter((d) => planned.days[d].stops.length > 0).sort() : [];
+  const planDates = planned ? Object.keys(planned.days).filter((d) => planned.days[d].stops.length + planned.days[d].midday.length > 0).sort() : [];
   const [selected, setSelected] = useState(null);
   const date = planDates.includes(selected) ? selected : planDates[0] || null;
   const [note, setNote] = useState("");
@@ -2680,8 +2683,8 @@ function VisitPlanner({ leads, quotes, setLeads }) {
     const changes = {};
     for (const dt of dates) {
       const d = planned.days[dt];
-      for (const e of dayView(d).entries) {
-        const s = d.stops.find((x) => x.id === e.id);
+      for (const e of [...d.midday, ...dayView(d).entries]) {
+        const s = e.stop || d.stops.find((x) => x.id === e.id);
         changes[s.leadId] = { visitDate: dt, visitTime: fmtHHMM(r5(e.start)) };
       }
     }
@@ -2689,7 +2692,7 @@ function VisitPlanner({ leads, quotes, setLeads }) {
     setLeads((rows) => rows.map((l) => (changes[l.id] ? { ...l, ...changes[l.id] } : l)));
     // A visit you moved to another day now carries that day on its lead, so the "moved" note isn't needed any more.
     const remaining = { ...saved.moves };
-    for (const dt of dates) for (const s of planned.days[dt].stops) if (remaining[s.id] === dt) delete remaining[s.id];
+    for (const dt of dates) for (const s of [...planned.days[dt].stops, ...planned.days[dt].midday.map((m) => m.stop)]) if (remaining[s.id] === dt) delete remaining[s.id];
     patchSaved({ moves: remaining });
     setNote(`Saved ${n} visit${n === 1 ? "" : "s"} — the dates and times are on those leads now, and in your calendar.`);
   };
@@ -2765,10 +2768,13 @@ function VisitPlanner({ leads, quotes, setLeads }) {
     window.location.href = smsHref(s.phone, body);
   };
 
+  // Where the day's driving starts from, in words.
+  const startName = (d) => (d.settings.start === "job" && d.job ? `${d.job.name}'s job` : (PLACES[d.settings.start]?.name || "start").split(" (")[0]);
   const copyDay = async (d) => {
     const v = dayView(d);
     const lines = [dayTitleLong(d.date)];
-    lines.push(`Leave ${PLACES[d.settings.start]?.name || "start"}${v.leave != null ? ` ${clock5(v.leave)}` : ""}`);
+    for (const m of d.midday) lines.push(`${clock5(m.start)}  ${m.stop.name} — ${m.stop.address}${m.stop.phone ? ` (${m.stop.phone})` : ""}  [mid-day, out of ${d.job.name}]`);
+    lines.push(`Leave ${startName(d)}${v.leave != null ? ` ${clock5(v.leave)}` : ""}`);
     for (const e of v.entries) {
       const s = d.stops.find((x) => x.id === e.id);
       lines.push(`${clock5(e.start)}  ${s.name} — ${s.address}${s.phone ? ` (${s.phone})` : ""}  [${Math.round(e.driveMin)} min drive]`);
@@ -2785,9 +2791,9 @@ function VisitPlanner({ leads, quotes, setLeads }) {
     const v = dayView(d);
     const addrs = v.entries.map((e) => d.stops.find((x) => x.id === e.id).query);
     if (addrs.length === 0) return null;
-    const origin = encodeURIComponent(`${PLACES[d.settings.start]?.name.split(" (")[0] || "Cleveland"} QLD`);
-    const dest = encodeURIComponent(addrs[addrs.length - 1]);
-    const way = addrs.slice(0, -1).map(encodeURIComponent).join("%7C");
+    const origin = encodeURIComponent(d.settings.start === "job" && d.job ? d.job.query : `${PLACES[d.settings.start]?.name.split(" (")[0] || "Cleveland"} QLD`);
+    const dest = encodeURIComponent(HOME.query);
+    const way = addrs.map(encodeURIComponent).join("%7C");
     return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${way ? `&waypoints=${way}` : ""}&travelmode=driving`;
   };
 
@@ -2795,6 +2801,61 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   const view = d ? dayView(d) : null;
   const best = d?.plan;
   const keep = d?.asBooked;
+
+  // The buttons under each visit (e = its entry in the plan: start time, length, the time the client was given).
+  const stopTools = (s, e, dd) => {
+    const onJob = dd.settings.start === "job" && !!dd.job;
+    return (
+      <div className="vp-actions">
+        <a className="btn-ghost small" href={mapsTo(s.address ? `${s.address}` : s.query)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>
+        {s.phone && <a className="btn-ghost small" href={`tel:${s.phone}`}><Phone size={13} /> Call</a>}
+        {s.phone ? (
+          <button className="btn-primary small" onClick={() => onMyWay(s, e)} disabled={busyStop === s.id} title="Works out your real ETA from where you are and opens a text to the client, ready to send">
+            <Send size={13} /> {busyStop === s.id ? "Working out your ETA…" : "On my way"}
+          </button>
+        ) : (
+          <span className="calc-note" style={{ margin: 0 }}>No phone number on this lead</span>
+        )}
+        {e.preferred != null && !e.midday && (
+          <button className={`btn-ghost small${saved.locks[s.id] ? " on" : ""}`} onClick={() => patchSaved({ locks: { ...saved.locks, [s.id]: !saved.locks[s.id] } })} title="Keep this client's time exactly and plan around it">
+            {saved.locks[s.id] ? <Lock size={13} /> : <Unlock size={13} />} {saved.locks[s.id] ? "Time kept" : "Keep time"}
+          </button>
+        )}
+        <label className="vp-nb" title={e.midday ? "The time you'll see them (saved in their notes)" : "This client can't be seen before this time (saved in their notes)"}>
+          {e.midday ? "Time" : "Not before"}
+          <input type="time" value={e.midday ? fmtHHMM(e.start) : s.notBefore != null ? fmtHHMM(s.notBefore) : ""} onChange={(ev) => setAvailability(s, { notBefore: parseTime(ev.target.value) })} />
+        </label>
+        <select className="vp-dur" value={e.durationMin} onChange={(ev) => patchSaved({ durations: { ...saved.durations, [s.id]: Number(ev.target.value) } })} aria-label="Visit length">
+          {[10, 15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
+        </select>
+        {onJob && (
+          e.midday ? (
+            <button className="btn-ghost small" onClick={() => patchSaved({ midday: { ...saved.midday, [s.id]: false } })} title="Do this one on the way home instead">After work instead</button>
+          ) : (
+            <button className="btn-ghost small" onClick={() => patchSaved({ midday: { ...saved.midday, [s.id]: true } })} title="Pop out of the job for this one (the client wants mid-day)">Do mid-day</button>
+          )
+        )}
+        <button className="btn-ghost small" onClick={() => setTextFor(s)}><ClipboardPaste size={13} /> Paste a text</button>
+        <button className="btn-ghost small" onClick={() => setEditLead(leads.find((l) => l.id === s.leadId) || null)}>Edit lead</button>
+        {askRemove === s.id ? (
+          <span className="vp-confirm">
+            Take {firstName(s.name) || "them"} out?
+            <button className="btn-primary small" onClick={() => removeVisit(s, "lost")} title="Keeps the lead, marked Lost">Mark lost</button>
+            <button className="btn-danger small" onClick={() => removeVisit(s, "delete")} title="Removes the lead completely">Delete</button>
+            <button className="btn-ghost small" onClick={() => setAskRemove(null)}>Keep</button>
+          </span>
+        ) : (
+          <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Cancelled</button>
+        )}
+        {!dd.saturday && dd.stops.length + dd.midday.length > 1 && (
+          <button className="btn-ghost small" onClick={() => moveStop(s, nextSaturdayIso(dd.date))}>
+            Move to Saturday{dd.moveSavings?.[s.id]?.driveMin >= 3 ? ` (saves ${Math.round(dd.moveSavings[s.id].driveMin)} min driving${dd.moveSavings[s.id].finishMin >= 10 ? `, home ${Math.round(dd.moveSavings[s.id].finishMin)} min earlier` : ""})` : ""}
+          </button>
+        )}
+        {s.movedByYou && <button className="btn-ghost small" onClick={() => moveStop(s, null)}>Back to {dayTitle(s.movedFrom)}</button>}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -2878,26 +2939,48 @@ function VisitPlanner({ leads, quotes, setLeads }) {
           <div className="vp-settings">
             <Field label="Starting from">
               <select value={d.settings.start} onChange={(e) => setDaySetting({ start: e.target.value })}>
+                {d.job && <option value="job">{d.job.name}'s job site</option>}
                 {Object.values(PLACES).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
               </select>
             </Field>
-            <Field label={d.settings.flexDepart && d.settings.depart != null ? "Earliest you can leave" : "Leave at"}>
-              <input type="time" value={d.settings.depart != null ? fmtHHMM(d.settings.depart) : ""} onChange={(e) => setDaySetting({ depart: parseTime(e.target.value) })} />
-            </Field>
-            <Field label="First visit no earlier than">
-              <input type="time" value={d.settings.earliestStart ? fmtHHMM(d.settings.earliestStart) : ""} onChange={(e) => setDaySetting({ earliestStart: parseTime(e.target.value) ?? 0 })} />
-            </Field>
+            {d.settings.start === "job" ? (
+              <>
+                <Field label="You start work at">
+                  <input type="time" value={fmtHHMM(saved.workStart)} onChange={(e) => patchSaved({ workStart: parseTime(e.target.value) ?? WORK_START })} />
+                </Field>
+                <Field label="Finish work at">
+                  <input type="time" value={fmtHHMM(d.job.workEnd)} onChange={(e) => setDaySetting({ workEnd: parseTime(e.target.value) ?? undefined })} />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label={d.settings.flexDepart && d.settings.depart != null ? "Earliest you can leave" : "Leave at"}>
+                  <input type="time" value={d.settings.depart != null ? fmtHHMM(d.settings.depart) : ""} onChange={(e) => setDaySetting({ depart: parseTime(e.target.value) })} />
+                </Field>
+                <Field label="First visit no earlier than">
+                  <input type="time" value={d.settings.earliestStart ? fmtHHMM(d.settings.earliestStart) : ""} onChange={(e) => setDaySetting({ earliestStart: parseTime(e.target.value) ?? 0 })} />
+                </Field>
+              </>
+            )}
           </div>
-          <label className="check-row">
-            <input type="checkbox" checked={!!d.settings.flexDepart && d.settings.depart != null} disabled={d.settings.depart == null} onChange={(e) => setDaySetting({ flexDepart: e.target.checked })} />
-            <span>Leave later if it helps — I'll pick the best time to leave (never earlier than the time above)</span>
-          </label>
+          {d.settings.start === "job" ? (
+            <p className="calc-note">
+              You're on <strong>{d.job.name}</strong> at {d.job.address} ({hoursLabel(d.job.hours)} of work), so the plan starts from the job when you finish and ends at home. It leaves as late as it usefully can.
+              {d.job.awayMin > 0 ? ` Mid-day visits take you away for ${Math.round(d.job.awayMin)} min, so work finishes about ${clock5(d.job.finishWork)}.` : ""}
+            </p>
+          ) : (
+            <label className="check-row">
+              <input type="checkbox" checked={!!d.settings.flexDepart && d.settings.depart != null} disabled={d.settings.depart == null} onChange={(e) => setDaySetting({ flexDepart: e.target.checked })} />
+              <span>Leave later if it helps — I'll pick the best time to leave (never earlier than the time above)</span>
+            </label>
+          )}
+          {d.job && d.settings.start !== "job" && <p className="calc-note">You're also on {d.job.name}'s job this day — pick it under "Starting from" to plan from the job site.</p>}
 
           <div className="vp-summary">
             <div><span>Leave</span><strong>{view.leave != null ? clock5(view.leave) : "—"}</strong></div>
-            <div><span>Last visit ends</span><strong>{clock5(view.finish)}</strong></div>
-            <div><span>Driving</span><strong>{Math.round(view.driveMin)} min</strong></div>
-            <div><span>Back to Burleigh</span><strong>+{Math.round(view.endLegMin)} min</strong></div>
+            <div><span>Last visit ends</span><strong>{view.finish != null ? clock5(view.finish) : d.midday.length ? clock5(d.midday[d.midday.length - 1].end) : "—"}</strong></div>
+            <div><span>Driving</span><strong>{Math.round(view.driveMin + d.midday.reduce((n, m) => n + m.driveMin + m.driveBack, 0))} min</strong></div>
+            <div><span>{planned.hasHome ? "Home" : "Back to Burleigh"}</span><strong>+{Math.round(view.endLegMin)} min</strong></div>
           </div>
           {!view.fits && (
             <div className="over-warning"><AlertTriangle size={14} /> Too tight: the last visit would start {Math.round(view.overBy)} min after 5:45pm. Move something to another day.</div>
@@ -2915,7 +2998,24 @@ function VisitPlanner({ leads, quotes, setLeads }) {
           {saved.mode === "keep" && (!keep || keep.infeasible) && <p className="calc-note">Your booked times can't all be met, so this shows the best route instead.</p>}
 
           <div className="vp-stops">
-            <div className="vp-leg"><Car size={13} /> Leave {PLACES[d.settings.start]?.name.split(" (")[0]}{view.leave != null ? ` at ${clock5(view.leave)}` : ""}</div>
+            {d.midday.map((m) => (
+              <div key={m.id}>
+                <div className="vp-leg"><Car size={13} /> Out of {d.job.name}'s job at {clock5(m.leave)} · {Math.round(m.driveMin)} min drive</div>
+                <div className="vp-stop vp-mid">
+                  <div className="vp-time">
+                    <strong>{clock5(m.start)}</strong>
+                    <span>{clock5(m.end)}</span>
+                  </div>
+                  <div className="vp-body">
+                    <div className="vp-name">{m.stop.name}{m.stop.jobType ? <span className="vp-type">{m.stop.jobType}</span> : null}<span className="vp-badge placed">mid-day</span>{m.stop.movedFrom ? <span className="vp-badge moved">moved from {dayTitle(m.stop.movedFrom)}</span> : null}</div>
+                    <div className="vp-addr">{m.stop.address}</div>
+                    <div className="vp-was">Back on the job about {clock5(m.back)} ({Math.round(m.awayMin)} min away) — so work finishes that much later.</div>
+                    {stopTools(m.stop, m, d)}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {view.entries.length > 0 && <div className="vp-leg"><Car size={13} /> Leave {startName(d)}{view.leave != null ? ` at ${clock5(view.leave)}` : ""}</div>}
             {view.entries.map((e, i) => {
               const s = d.stops.find((x) => x.id === e.id);
               const shift = e.preferred != null ? r5(e.start) - e.preferred : null;
@@ -2938,53 +3038,13 @@ function VisitPlanner({ leads, quotes, setLeads }) {
                       )}
                       {s.notBefore != null && <div className="vp-was moved">Available from {fmtClock(s.notBefore)} onwards{s.notAfter != null ? `, done before ${fmtClock(s.notAfter)}` : ""}</div>}
                       {s.notBefore == null && s.notAfter != null && <div className="vp-was moved">Needs to be done before {fmtClock(s.notAfter)}</div>}
-                      <div className="vp-actions">
-                        <a className="btn-ghost small" href={mapsTo(s.address ? `${s.address}` : s.query)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>
-                        {s.phone && <a className="btn-ghost small" href={`tel:${s.phone}`}><Phone size={13} /> Call</a>}
-                        {s.phone ? (
-                          <button className="btn-primary small" onClick={() => onMyWay(s, e)} disabled={busyStop === s.id} title="Works out your real ETA from where you are and opens a text to the client, ready to send">
-                            <Send size={13} /> {busyStop === s.id ? "Working out your ETA…" : "On my way"}
-                          </button>
-                        ) : (
-                          <span className="calc-note" style={{ margin: 0 }}>No phone number on this lead</span>
-                        )}
-                        {e.preferred != null && (
-                          <button className={`btn-ghost small${saved.locks[s.id] ? " on" : ""}`} onClick={() => patchSaved({ locks: { ...saved.locks, [s.id]: !saved.locks[s.id] } })} title="Keep this client's time exactly and plan around it">
-                            {saved.locks[s.id] ? <Lock size={13} /> : <Unlock size={13} />} {saved.locks[s.id] ? "Time kept" : "Keep time"}
-                          </button>
-                        )}
-                        <label className="vp-nb" title="This client can't be seen before this time (saved in their notes)">
-                          Not before
-                          <input type="time" value={s.notBefore != null ? fmtHHMM(s.notBefore) : ""} onChange={(ev) => setAvailability(s, { notBefore: parseTime(ev.target.value) })} />
-                        </label>
-                        <select className="vp-dur" value={e.durationMin} onChange={(ev) => patchSaved({ durations: { ...saved.durations, [s.id]: Number(ev.target.value) } })} aria-label="Visit length">
-                          {[10, 15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
-                        </select>
-                        <button className="btn-ghost small" onClick={() => setTextFor(s)}><ClipboardPaste size={13} /> Paste a text</button>
-                        <button className="btn-ghost small" onClick={() => setEditLead(leads.find((l) => l.id === s.leadId) || null)}>Edit lead</button>
-                        {askRemove === s.id ? (
-                          <span className="vp-confirm">
-                            Take {firstName(s.name) || "them"} out?
-                            <button className="btn-primary small" onClick={() => removeVisit(s, "lost")} title="Keeps the lead, marked Lost">Mark lost</button>
-                            <button className="btn-danger small" onClick={() => removeVisit(s, "delete")} title="Removes the lead completely">Delete</button>
-                            <button className="btn-ghost small" onClick={() => setAskRemove(null)}>Keep</button>
-                          </span>
-                        ) : (
-                          <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Cancelled</button>
-                        )}
-                        {!d.saturday && d.stops.length > 1 && (
-                          <button className="btn-ghost small" onClick={() => moveStop(s, nextSaturdayIso(d.date))}>
-                            Move to Saturday{d.moveSavings?.[s.id]?.driveMin >= 3 ? ` (saves ${Math.round(d.moveSavings[s.id].driveMin)} min driving${d.moveSavings[s.id].finishMin >= 10 ? `, home ${Math.round(d.moveSavings[s.id].finishMin)} min earlier` : ""})` : ""}
-                          </button>
-                        )}
-                        {s.movedByYou && <button className="btn-ghost small" onClick={() => moveStop(s, null)}>Back to {dayTitle(s.movedFrom)}</button>}
-                      </div>
+                      {stopTools(s, e, d)}
                     </div>
                   </div>
                 </div>
               );
             })}
-            <div className="vp-leg"><Car size={13} /> Then about {Math.round(view.endLegMin)} min back to Burleigh</div>
+            {view.entries.length > 0 && <div className="vp-leg"><Car size={13} /> Then about {Math.round(view.endLegMin)} min {planned.hasHome ? "home to Matilda St" : "back to Burleigh"}</div>}
           </div>
 
           {d.moved.length > 0 && (
