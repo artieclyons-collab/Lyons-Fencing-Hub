@@ -1,5 +1,5 @@
 // Receives client texts forwarded from the iPhone (a Shortcuts automation posts each incoming message here).
-// If the sender's number matches a lead, the text is added to that lead's notes and any availability in it
+// If the sender's number (or, for a saved contact, exact name) matches a lead, the text is added to that lead's notes and any availability in it
 // ("free from 3:30") is picked up for the visit planner. Texts from anyone who isn't a lead are ignored and
 // NOT stored — your personal messages never end up in the hub.
 // Same shared secret as the phone-agent webhooks (x-api-key = PHONE_AGENT_API_KEY).
@@ -34,13 +34,18 @@ export async function POST(req) {
   if (!supabaseAdmin) return NextResponse.json({ error: "Database not configured" }, { status: 501 });
 
   const body = await req.json().catch(() => ({}));
-  const from = tail(body.from);
+  const rawFrom = String(body.from || "").trim();
+  const from = tail(rawFrom);
   const text = String(body.text ?? body.message ?? "").trim();
-  if (from.length < 8 || !text) return NextResponse.json({ ok: true, matched: false });
+  // iPhone Shortcuts gives a saved contact's NAME instead of the number, so a sender with no digits is matched by exact name.
+  const byName = !/\d/.test(rawFrom) && rawFrom.length >= 2;
+  if ((!byName && from.length < 8) || !text) return NextResponse.json({ ok: true, matched: false });
 
   const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,notes").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const lead = (leads || []).find((l) => tail(l.phone) === from);
+  const norm = (s) => String(s || "").replace(/\?/g, "").trim().toLowerCase();
+  const named = byName ? (leads || []).filter((l) => norm(l.name) === norm(rawFrom)) : [];
+  const lead = byName ? (named.length === 1 ? named[0] : null) : (leads || []).find((l) => tail(l.phone) === from);
   if (!lead) return NextResponse.json({ ok: true, matched: false }); // not a lead: drop it, store nothing
 
   const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
