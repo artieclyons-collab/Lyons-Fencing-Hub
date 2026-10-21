@@ -39,7 +39,11 @@ export async function POST(req) {
   const text = String(body.text ?? body.message ?? "").trim();
   // iPhone Shortcuts gives a saved contact's NAME instead of the number, so a sender with no digits is matched by exact name.
   const byName = !/\d/.test(rawFrom) && rawFrom.length >= 2;
-  if ((!byName && from.length < 8) || !text) return NextResponse.json({ ok: true, matched: false });
+  if ((!byName && from.length < 8) || !text) {
+    // Nothing usable arrived (e.g. a Shortcut variable that came through empty) — say so in the log, never the content.
+    console.log(`inbound-text: ignored, nothing usable (from is ${rawFrom.length} chars, text is ${text.length} chars, body keys: ${Object.keys(body).join(",") || "none"})`);
+    return NextResponse.json({ ok: true, matched: false });
+  }
 
   const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,notes").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
