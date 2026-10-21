@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseAvailability, parseNotesAvailability, withAvailability } from "@/lib/availability";
+import { detectEnquiry, localPhone } from "@/lib/enquiry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,6 +54,35 @@ export async function POST(req) {
   const lead = byName ? (named.length === 1 ? named[0] : null) : (leads || []).find((l) => tail(l.phone) === from);
   // Vercel's log shows why a text wasn't matched (never the message, and only the last 3 digits of a number).
   if (!lead) console.log(`inbound-text: no lead for ${byName ? `name "${rawFrom}" (${named.length} matches)` : `number ending ${from.slice(-3)}`}`);
+
+  // An unknown NUMBER (not a saved contact) whose text reads like a fencing enquiry becomes a new lead. A saved contact's
+  // name, or a text that doesn't mention fencing or a quote, is treated as personal: dropped, nothing stored.
+  if (!lead && !byName) {
+    const enq = detectEnquiry(text);
+    if (!enq.isEnquiry) return NextResponse.json({ ok: true, matched: false });
+    const phone = localPhone(rawFrom);
+    const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
+    let notes = `Text ${stamp()}: ${clean}`;
+    const found = parseAvailability(text);
+    if (found.notBefore != null || found.notAfter != null) notes = withAvailability(notes, found);
+    const row = {
+      // One lead per number: a second text arriving at the same moment (or a second automation) can't make a duplicate.
+      id: `txt${from}`,
+      name: enq.name || `Enquiry ${phone}`,
+      phone,
+      email: null,
+      address: enq.address || "",
+      jobType: enq.jobType,
+      status: "New",
+      notes,
+      createdAt: new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date()),
+      source: "text",
+    };
+    const { error: insErr } = await supabaseAdmin.from("leads").upsert(row, { onConflict: "id", ignoreDuplicates: true });
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+    console.log(`inbound-text: new lead created from a text (number ending ${from.slice(-3)})`);
+    return NextResponse.json({ ok: true, matched: false, created: true, leadId: row.id });
+  }
   if (!lead) return NextResponse.json({ ok: true, matched: false }); // not a lead: drop it, store nothing
 
   const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
