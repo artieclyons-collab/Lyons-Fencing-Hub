@@ -9,6 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone,
 } from "lucide-react";
 
 import {
@@ -29,6 +30,10 @@ import {
 } from "@/lib/jobSchedule";
 import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
+import { collectVisits } from "@/lib/visitData";
+import { buildNodes, runPlan } from "@/lib/visitRun";
+import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
+import { parseAvailability, parseDay, withAvailability, parseNotesAvailability } from "@/lib/availability";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -862,6 +867,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
     initial || { name: "", phone: "", email: "", address: "", jobType: JOB_TYPES[0], status: "New", notes: "" }
   );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [showText, setShowText] = useState(false);
 
   return (
     <Modal title={initial ? "Edit lead" : "New lead"} onClose={onClose}>
@@ -888,7 +894,17 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
         <Field label="Visit time (optional)"><input type="time" value={form.visitTime || ""} onChange={(e) => set("visitTime", e.target.value)} /></Field>
       </div>
       <p className="calc-note" style={{ marginTop: -6 }}>A site visit goes straight into your iPhone calendar with reminders (see the calendar button at the top).</p>
-      <Field label="Notes"><textarea rows={3} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Site details, measurements, timing..." /></Field>
+      <Field label="Notes"><textarea rows={3} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Site details, measurements, timing... (e.g. “Available from 3:30pm onwards.” is picked up by the visit planner)" /></Field>
+      <div className="calc-trigger-row" style={{ marginTop: -4 }}>
+        <button type="button" className="btn-ghost small" onClick={() => setShowText(true)}><ClipboardPaste size={14} /> Paste a text from them</button>
+      </div>
+      {showText && (
+        <TextImportModal
+          lead={form}
+          onClose={() => setShowText(false)}
+          onApply={(patch) => { setForm((f) => ({ ...f, ...patch })); setShowText(false); }}
+        />
+      )}
 
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
@@ -2459,10 +2475,521 @@ function DocumentPreviewModal({ type, data, onClose }) {
   );
 }
 
+// ---------- Visit planner ----------
+// Works out the best order and times for your quote visits (see lib/visitPlanner.js for the rules).
+const GEO_KEY = "lyons:geo";
+const PLAN_KEY = "lyons:visit-plan";
+const readLS = (k, fallback) => {
+  try {
+    const raw = window.localStorage.getItem(k);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const writeLS = (k, v) => {
+  try {
+    window.localStorage.setItem(k, JSON.stringify(v));
+  } catch {}
+};
+const waitMs = (ms) => new Promise((r) => setTimeout(r, ms));
+const r5 = (m) => Math.round(m / 5) * 5; // times shown and saved to the nearest 5 minutes
+const clock5 = (m) => fmtClock(r5(m));
+const mapsTo = (address) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
+const dayTitle = (date) => new Date(`${date}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+const dayTitleLong = (date) => new Date(`${date}T00:00:00`).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+
+const DEFAULT_SMS = "Hi {name}, it's Artie from Lyons Fencing. I'm on my way to you now and should be there around {eta}. See you soon!";
+// "Greg " -> "Greg"; skip placeholders like "N/A" so the text just says "Hi,".
+const firstName = (name) => {
+  const n = String(name || "").replace(/\(.*?\)/g, "").trim().split(/\s+/)[0] || "";
+  return /^(n\/?a|lead|client)$/i.test(n) ? "" : n;
+};
+// iPhone wants "&body=" after the number, others "?body=".
+const smsHref = (phone, body) => {
+  const sep = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "&" : "?";
+  return `sms:${String(phone).replace(/[^\d+]/g, "")}${sep}body=${encodeURIComponent(body)}`;
+};
+const nextSaturdayIso = (date) => {
+  let d = date;
+  for (let i = 0; i < 8; i++) {
+    d = addDaysIso(d, 1);
+    if (new Date(`${d}T00:00:00Z`).getUTCDay() === 6) return d;
+  }
+  return d;
+};
+const nowMinutes = () => {
+  const n = new Date();
+  return n.getHours() * 60 + n.getMinutes();
+};
+
+// Paste what a client texted you: the hub keeps it in the lead's notes and picks out when they're available.
+function TextImportModal({ lead, onApply, onClose }) {
+  const [text, setText] = useState("");
+  const avail = parseAvailability(text);
+  const day = parseDay(text, today());
+  const hasAvail = avail.notBefore != null || avail.notAfter != null;
+  const [useAvail, setUseAvail] = useState(true);
+  const [useDay, setUseDay] = useState(true);
+  const when = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+
+  const apply = () => {
+    const clean = text.trim().replace(/\s*\n\s*/g, " ").slice(0, 600);
+    let notes = [String(lead.notes || "").trim(), clean ? `Text ${when}: ${clean}` : ""].filter(Boolean).join("\n");
+    if (useAvail && hasAvail) {
+      const cur = parseNotesAvailability(lead.notes);
+      notes = withAvailability(notes, { notBefore: avail.notBefore ?? cur.notBefore, notAfter: avail.notAfter ?? cur.notAfter });
+    }
+    const patch = { notes };
+    if (useDay && day) patch.visitDate = day;
+    onApply(patch);
+  };
+
+  return (
+    <Modal title={`Add a text${lead.name ? ` from ${firstName(lead.name) || lead.name}` : ""}`} onClose={onClose}>
+      <p className="calc-note">Copy the client's text on your phone and paste it here. It's saved in their notes, and anything about when they're free is picked out for the visit planner.</p>
+      <Field label="Their text">
+        <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Friday after 3:30 works for me, I'm at 12 Smith St" autoFocus />
+      </Field>
+      {text.trim() && (
+        <div className="panel" style={{ marginBottom: 12 }}>
+          <div className="panel-head"><Check size={14} /><span>What I picked out</span></div>
+          {!hasAvail && !day && <p className="calc-note" style={{ margin: 0 }}>Nothing about times or days — it'll just be saved in the notes.</p>}
+          {hasAvail && (
+            <label className="check-row">
+              <input type="checkbox" checked={useAvail} onChange={(e) => setUseAvail(e.target.checked)} />
+              <span>
+                {avail.notBefore != null ? `Free from ${fmtClock(avail.notBefore)} onwards` : ""}
+                {avail.notBefore != null && avail.notAfter != null ? ", " : ""}
+                {avail.notAfter != null ? `needs to be done before ${fmtClock(avail.notAfter)}` : ""} — the planner will respect this
+              </span>
+            </label>
+          )}
+          {day && (
+            <label className="check-row">
+              <input type="checkbox" checked={useDay} onChange={(e) => setUseDay(e.target.checked)} />
+              <span>Set the visit day to {dayTitleLong(day)}</span>
+            </label>
+          )}
+        </div>
+      )}
+      <div className="modal-actions">
+        <button className="btn-primary" disabled={!text.trim()} onClick={apply}><Check size={15} /> Save to {firstName(lead.name) || "the lead"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function VisitPlanner({ leads, quotes, setLeads }) {
+  const t = today();
+  const { confirmed, flexible, left } = useMemo(() => collectVisits(leads, quotes, t), [leads, quotes, t]);
+  const allStops = useMemo(() => [...confirmed, ...flexible], [confirmed, flexible]);
+
+  // What you've chosen (kept on this device): which view, per-day start settings, locked times, visit lengths.
+  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
+  useEffect(() => writeLS(PLAN_KEY, saved), [saved]);
+  const patchSaved = (patch) => setSaved((s) => ({ ...s, ...patch }));
+
+  // ----- 1) find each address on the map (one a second, remembered after the first time) -----
+  const [coords, setCoords] = useState(() => readLS(GEO_KEY, {})); // address text -> { lat, lon } | false (not found)
+  const [geo, setGeo] = useState({ running: false, done: 0, total: 0 });
+  const [retry, setRetry] = useState(0);
+  const queryKey = allStops.map((s) => s.query).join("|");
+  useEffect(() => {
+    const todo = [...new Set(allStops.map((s) => s.query))].filter((q) => coords[q] === undefined);
+    if (todo.length === 0) return undefined;
+    let cancelled = false;
+    (async () => {
+      setGeo({ running: true, done: 0, total: todo.length });
+      const found = {};
+      for (let i = 0; i < todo.length && !cancelled; i++) {
+        try {
+          const r = await fetch("/api/plan/locate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: todo[i] }) });
+          const b = await r.json().catch(() => ({}));
+          if (r.ok) found[todo[i]] = { lat: b.lat, lon: b.lon };
+          else if (r.status === 404) found[todo[i]] = false; // genuinely not on the map; a temporary error is simply retried next time
+        } catch {
+          // network blip: try again next time
+        }
+        setGeo({ running: true, done: i + 1, total: todo.length });
+        if (i < todo.length - 1) await waitMs(1100);
+      }
+      if (cancelled) return;
+      setCoords((c) => {
+        const merged = { ...c, ...found };
+        writeLS(GEO_KEY, merged);
+        return merged;
+      });
+      setGeo({ running: false, done: 0, total: 0 });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey, retry]);
+
+  // ----- 2) real driving times between everything -----
+  const { nodes, index } = useMemo(() => buildNodes(allStops, coords), [allStops, coords]);
+  const nodeKey = nodes.map((n) => `${n.lat.toFixed(4)},${n.lon.toFixed(4)}`).join(";");
+  const [matrix, setMatrix] = useState(null); // { key, minutesRaw, source }
+  const [matrixError, setMatrixError] = useState("");
+  useEffect(() => {
+    if (nodes.length <= 3) { setMatrix(null); return undefined; }
+    if (matrix?.key === nodeKey) return undefined;
+    let off = false;
+    setMatrixError("");
+    fetch("/api/plan/drive-times", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ points: nodes }) })
+      .then(async (r) => {
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok || !b.minutes) throw new Error(b.error || "no driving times");
+        if (!off) setMatrix({ key: nodeKey, minutesRaw: b.minutes, source: b.source });
+      })
+      .catch((e) => { if (!off) setMatrixError(e.message); });
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKey]);
+
+  // ----- 3) the plan -----
+  const planned = useMemo(() => {
+    if (!matrix || matrix.key !== nodeKey) return null;
+    return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves });
+  }, [matrix, nodeKey, confirmed, flexible, coords, index, saved.overrides, saved.locks, saved.durations, saved.moves]);
+
+  const planDates = planned ? Object.keys(planned.days).filter((d) => planned.days[d].stops.length > 0).sort() : [];
+  const [selected, setSelected] = useState(null);
+  const date = planDates.includes(selected) ? selected : planDates[0] || null;
+  const [note, setNote] = useState("");
+
+  const missing = allStops.filter((s) => coords[s.query] === false);
+  const lookingUp = geo.running || (allStops.length > 0 && allStops.some((s) => coords[s.query] === undefined));
+
+  // The plan for the day being looked at, in whichever view is chosen.
+  const dayView = (d) => {
+    const keep = saved.mode === "keep" && d.asBooked && !d.asBooked.infeasible;
+    return keep ? d.asBooked : d.plan;
+  };
+
+  const settingsFor = (d) => ({ ...d.settings });
+  const setDaySetting = (patch) => patchSaved({ overrides: { ...saved.overrides, [date]: { ...(saved.overrides[date] || {}), ...patch } } });
+
+  const apply = (dates) => {
+    const changes = {};
+    for (const dt of dates) {
+      const d = planned.days[dt];
+      for (const e of dayView(d).entries) {
+        const s = d.stops.find((x) => x.id === e.id);
+        changes[s.leadId] = { visitDate: dt, visitTime: fmtHHMM(r5(e.start)) };
+      }
+    }
+    const n = Object.keys(changes).length;
+    setLeads((rows) => rows.map((l) => (changes[l.id] ? { ...l, ...changes[l.id] } : l)));
+    // A visit you moved to another day now carries that day on its lead, so the "moved" note isn't needed any more.
+    const remaining = { ...saved.moves };
+    for (const dt of dates) for (const s of planned.days[dt].stops) if (remaining[s.id] === dt) delete remaining[s.id];
+    patchSaved({ moves: remaining });
+    setNote(`Saved ${n} visit${n === 1 ? "" : "s"} — the dates and times are on those leads now, and in your calendar.`);
+  };
+
+  // ----- things you can change on a visit -----
+  const [textFor, setTextFor] = useState(null); // the stop whose text message is being pasted
+  const [busyStop, setBusyStop] = useState(null);
+  const [showSms, setShowSms] = useState(false);
+  const setAvailability = (s, patch) => {
+    const cur = { notBefore: s.notBefore ?? null, notAfter: s.notAfter ?? null, ...patch };
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, notes: withAvailability(l.notes, cur) } : l)));
+  };
+  const moveStop = (s, date) => {
+    const next = { ...saved.moves };
+    if (date) next[s.id] = date;
+    else delete next[s.id];
+    patchSaved({ moves: next });
+    if (date) setSelected(date);
+  };
+
+  // "On my way": works out when you'll really get there from where you are now, then opens a text to the client
+  // ready to send (it goes from your own number, so replies land in your Messages).
+  const onMyWay = async (s, entry) => {
+    setBusyStop(s.id);
+    let etaMin = Math.max(entry.start, nowMinutes());
+    let how = "the planned time (your location wasn't available)";
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        if (!navigator.geolocation) reject(new Error("no location"));
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+      });
+      const dest = coords[s.query];
+      if (dest) {
+        const r = await fetch("/api/plan/drive-times", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ points: [{ lat: pos.coords.latitude, lon: pos.coords.longitude }, dest] }),
+        });
+        const b = await r.json();
+        const drive = b.minutes?.[0]?.[1];
+        if (Number.isFinite(drive)) {
+          etaMin = nowMinutes() + Math.ceil(drive * TRAFFIC_FACTOR);
+          how = `${Math.ceil(drive * TRAFFIC_FACTOR)} min from where you are now`;
+        }
+      }
+    } catch {
+      // no location permission or no signal: the planned time is used
+    }
+    const eta = fmtClock(Math.ceil(etaMin / 5) * 5);
+    const body = String(saved.smsTemplate || DEFAULT_SMS).replace("{name}", firstName(s.name) || "there").replace("{eta}", eta).replace("Hi there,", "Hi,");
+    setBusyStop(null);
+    setNote(`Opening a text to ${firstName(s.name) || s.name} saying around ${eta} — worked out from ${how}.`);
+    window.location.href = smsHref(s.phone, body);
+  };
+
+  const copyDay = async (d) => {
+    const v = dayView(d);
+    const lines = [dayTitleLong(d.date)];
+    lines.push(`Leave ${PLACES[d.settings.start]?.name || "start"}${v.leave != null ? ` ${clock5(v.leave)}` : ""}`);
+    for (const e of v.entries) {
+      const s = d.stops.find((x) => x.id === e.id);
+      lines.push(`${clock5(e.start)}  ${s.name} — ${s.address}${s.phone ? ` (${s.phone})` : ""}  [${Math.round(e.driveMin)} min drive]`);
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setNote("Copied — paste it into a text or note.");
+    } catch {
+      setNote("Couldn't copy automatically.");
+    }
+  };
+
+  const routeLink = (d) => {
+    const v = dayView(d);
+    const addrs = v.entries.map((e) => d.stops.find((x) => x.id === e.id).query);
+    if (addrs.length === 0) return null;
+    const origin = encodeURIComponent(`${PLACES[d.settings.start]?.name.split(" (")[0] || "Cleveland"} QLD`);
+    const dest = encodeURIComponent(addrs[addrs.length - 1]);
+    const way = addrs.slice(0, -1).map(encodeURIComponent).join("%7C");
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${way ? `&waypoints=${way}` : ""}&travelmode=driving`;
+  };
+
+  const d = planned && date ? planned.days[date] : null;
+  const view = d ? dayView(d) : null;
+  const best = d?.plan;
+  const keep = d?.asBooked;
+
+  return (
+    <div>
+      <div className="section-head">
+        <h1>Visit planner</h1>
+        <p>Works out the best order and times for your quote visits, north to south, with real driving times. Leads with a ? after the name are left out until they confirm.</p>
+      </div>
+
+      {allStops.length === 0 && (
+        <EmptyState icon={Route} title="No visits to plan" hint="Give a lead an address and a site visit date (Leads tab) and it shows up here. A lead with an address but no date gets placed on the best day." />
+      )}
+
+      {lookingUp && (
+        <div className="fuel-note"><MapPin size={14} /> Finding addresses on the map… {geo.total > 0 ? `${geo.done} of ${geo.total}` : ""} (only needed the first time)</div>
+      )}
+      {matrixError && <p className="calc-note" style={{ color: "var(--bad)" }}>Couldn't get driving times ({matrixError}). Try again in a minute.</p>}
+      {matrix?.source === "estimate" && (
+        <p className="calc-note">The routing service is busy, so these drive times are straight-line estimates, not real roads. Treat them as rough.</p>
+      )}
+      {note && <p className="calc-note" style={{ color: "var(--good)" }}>{note}</p>}
+
+      {(left.length > 0 || missing.length > 0 || (planned?.notes || []).length > 0) && (
+        <div className="panel">
+          <div className="panel-head"><AlertTriangle size={16} /><span>Left out of the plan</span></div>
+          {left.map((l, i) => (
+            <div key={i} className="vp-left"><strong>{l.name}</strong> — {l.why}{l.date ? ` (${dayTitle(l.date)})` : ""}</div>
+          ))}
+          {missing.map((s) => (
+            <div key={s.id} className="vp-left"><strong>{s.name}</strong> — couldn't find "{s.address}" on the map. Check the address on the lead.{" "}
+              <button className="link-btn" onClick={() => { setCoords((c) => { const n = { ...c }; delete n[s.query]; writeLS(GEO_KEY, n); return n; }); setRetry((r) => r + 1); }}>Try again</button>
+            </div>
+          ))}
+          {(planned?.notes || []).map((n, i) => <div key={i} className="vp-left">{n.text}</div>)}
+        </div>
+      )}
+
+      {planDates.length > 0 && (
+        <>
+          <div className="vp-modebar">
+            <div className="vp-seg">
+              <button className={saved.mode === "best" ? "on" : ""} onClick={() => patchSaved({ mode: "best" })}>Best route</button>
+              <button className={saved.mode === "keep" ? "on" : ""} onClick={() => patchSaved({ mode: "keep" })}>Keep my booked times</button>
+            </div>
+            <span className="calc-note" style={{ margin: 0 }}>Best route may move some times; "keep" sticks to the times you gave clients.</span>
+          </div>
+
+          <div className="vp-days">
+            {planDates.map((dt) => {
+              const dd = planned.days[dt];
+              return (
+                <button key={dt} className={`vp-day${dt === date ? " on" : ""}${dd.plan.fits ? "" : " warn"}`} onClick={() => setSelected(dt)}>
+                  <strong>{dayTitle(dt)}</strong>
+                  <span>{dd.stops.length} visit{dd.stops.length === 1 ? "" : "s"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {d && view && (
+        <div className="panel">
+          <div className="panel-head"><Route size={16} /><span>{dayTitleLong(d.date)}</span></div>
+
+          <div className="vp-settings">
+            <Field label="Starting from">
+              <select value={d.settings.start} onChange={(e) => setDaySetting({ start: e.target.value })}>
+                {Object.values(PLACES).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
+              </select>
+            </Field>
+            <Field label={d.settings.flexDepart && d.settings.depart != null ? "Earliest you can leave" : "Leave at"}>
+              <input type="time" value={d.settings.depart != null ? fmtHHMM(d.settings.depart) : ""} onChange={(e) => setDaySetting({ depart: parseTime(e.target.value) })} />
+            </Field>
+            <Field label="First visit no earlier than">
+              <input type="time" value={d.settings.earliestStart ? fmtHHMM(d.settings.earliestStart) : ""} onChange={(e) => setDaySetting({ earliestStart: parseTime(e.target.value) ?? 0 })} />
+            </Field>
+          </div>
+          <label className="check-row">
+            <input type="checkbox" checked={!!d.settings.flexDepart && d.settings.depart != null} disabled={d.settings.depart == null} onChange={(e) => setDaySetting({ flexDepart: e.target.checked })} />
+            <span>Leave later if it helps — I'll pick the best time to leave (never earlier than the time above)</span>
+          </label>
+
+          <div className="vp-summary">
+            <div><span>Leave</span><strong>{view.leave != null ? clock5(view.leave) : "—"}</strong></div>
+            <div><span>Last visit ends</span><strong>{clock5(view.finish)}</strong></div>
+            <div><span>Driving</span><strong>{Math.round(view.driveMin)} min</strong></div>
+            <div><span>Back to Burleigh</span><strong>+{Math.round(view.endLegMin)} min</strong></div>
+          </div>
+          {!view.fits && (
+            <div className="over-warning"><AlertTriangle size={14} /> Too tight: the last visit would start {Math.round(view.overBy)} min after 5:45pm. Move something to another day.</div>
+          )}
+
+          {keep && !keep.infeasible && best && saved.mode === "best" && (Math.round(keep.driveMin - best.driveMin) > 0 || keep.finish - best.finish > 10) && (
+            <p className="calc-note vp-compare">
+              Keeping every time you gave would mean <strong>{Math.round(keep.driveMin)} min</strong> driving (+{Math.max(0, Math.round(keep.driveMin - best.driveMin))}) and finishing at <strong>{clock5(keep.finish)}</strong>
+              {keep.entries.some((e) => e.lateBy > 0) ? `, with ${keep.entries.filter((e) => e.lateBy > 0).map((e) => `${d.stops.find((s) => s.id === e.id).name} ${e.lateBy} min late`).join(", ")}` : ""}.
+            </p>
+          )}
+          {keep?.infeasible && saved.mode === "best" && d.stops.some((s) => s.preferred != null) && (
+            <p className="calc-note vp-compare">The times you've given clients can't all be met (the drives are too far apart), so something has to move.</p>
+          )}
+          {saved.mode === "keep" && (!keep || keep.infeasible) && <p className="calc-note">Your booked times can't all be met, so this shows the best route instead.</p>}
+
+          <div className="vp-stops">
+            <div className="vp-leg"><Car size={13} /> Leave {PLACES[d.settings.start]?.name.split(" (")[0]}{view.leave != null ? ` at ${clock5(view.leave)}` : ""}</div>
+            {view.entries.map((e, i) => {
+              const s = d.stops.find((x) => x.id === e.id);
+              const shift = e.preferred != null ? r5(e.start) - e.preferred : null;
+              return (
+                <div key={e.id}>
+                  <div className="vp-leg"><Car size={13} /> {Math.round(e.driveMin)} min drive</div>
+                  <div className={`vp-stop${e.lateBy > 0 ? " late" : ""}`}>
+                    <div className="vp-time">
+                      <strong>{clock5(e.start)}</strong>
+                      <span>{clock5(e.end)}</span>
+                    </div>
+                    <div className="vp-body">
+                      <div className="vp-name">{i + 1}. {s.name}{s.jobType ? <span className="vp-type">{s.jobType}</span> : null}{s.movedFrom ? <span className="vp-badge moved">moved from {dayTitle(s.movedFrom)}</span> : null}{s.placed ? <span className="vp-badge placed">placed here</span> : null}</div>
+                      <div className="vp-addr">{s.address}</div>
+                      {e.preferred != null && (
+                        <div className={`vp-was${Math.abs(shift) >= 15 ? " moved" : ""}`}>
+                          {Math.abs(shift) < 15 ? `Keeps your ${fmtClock(e.preferred)}` : `Was ${fmtClock(e.preferred)} — ${shift < 0 ? `${Math.abs(shift)} min earlier` : `${shift} min later`}`}
+                          {e.lateBy > 0 ? ` · ${e.lateBy} min late` : ""}
+                        </div>
+                      )}
+                      {s.notBefore != null && <div className="vp-was moved">Available from {fmtClock(s.notBefore)} onwards{s.notAfter != null ? `, done before ${fmtClock(s.notAfter)}` : ""}</div>}
+                      {s.notBefore == null && s.notAfter != null && <div className="vp-was moved">Needs to be done before {fmtClock(s.notAfter)}</div>}
+                      <div className="vp-actions">
+                        <a className="btn-ghost small" href={mapsTo(s.address ? `${s.address}` : s.query)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>
+                        {s.phone && <a className="btn-ghost small" href={`tel:${s.phone}`}><Phone size={13} /> Call</a>}
+                        {s.phone ? (
+                          <button className="btn-primary small" onClick={() => onMyWay(s, e)} disabled={busyStop === s.id} title="Works out your real ETA from where you are and opens a text to the client, ready to send">
+                            <Send size={13} /> {busyStop === s.id ? "Working out your ETA…" : "On my way"}
+                          </button>
+                        ) : (
+                          <span className="calc-note" style={{ margin: 0 }}>No phone number on this lead</span>
+                        )}
+                        {e.preferred != null && (
+                          <button className={`btn-ghost small${saved.locks[s.id] ? " on" : ""}`} onClick={() => patchSaved({ locks: { ...saved.locks, [s.id]: !saved.locks[s.id] } })} title="Keep this client's time exactly and plan around it">
+                            {saved.locks[s.id] ? <Lock size={13} /> : <Unlock size={13} />} {saved.locks[s.id] ? "Time kept" : "Keep time"}
+                          </button>
+                        )}
+                        <label className="vp-nb" title="This client can't be seen before this time (saved in their notes)">
+                          Not before
+                          <input type="time" value={s.notBefore != null ? fmtHHMM(s.notBefore) : ""} onChange={(ev) => setAvailability(s, { notBefore: parseTime(ev.target.value) })} />
+                        </label>
+                        <select className="vp-dur" value={e.durationMin} onChange={(ev) => patchSaved({ durations: { ...saved.durations, [s.id]: Number(ev.target.value) } })} aria-label="Visit length">
+                          {[10, 15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
+                        </select>
+                        <button className="btn-ghost small" onClick={() => setTextFor(s)}><ClipboardPaste size={13} /> Paste a text</button>
+                        {!d.saturday && d.stops.length > 1 && (
+                          <button className="btn-ghost small" onClick={() => moveStop(s, nextSaturdayIso(d.date))}>
+                            Move to Saturday{d.moveSavings?.[s.id]?.driveMin >= 3 ? ` (saves ${Math.round(d.moveSavings[s.id].driveMin)} min driving${d.moveSavings[s.id].finishMin >= 10 ? `, home ${Math.round(d.moveSavings[s.id].finishMin)} min earlier` : ""})` : ""}
+                          </button>
+                        )}
+                        {s.movedByYou && <button className="btn-ghost small" onClick={() => moveStop(s, null)}>Back to {dayTitle(s.movedFrom)}</button>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="vp-leg"><Car size={13} /> Then about {Math.round(view.endLegMin)} min back to Burleigh</div>
+          </div>
+
+          {d.moved.length > 0 && (
+            <div className="over-warning"><AlertTriangle size={14} /> Too much for this day, so {d.moved.map((s) => s.name).join(", ")} {d.moved.length === 1 ? "is" : "are"} suggested for the next Saturday instead.</div>
+          )}
+
+          <div className="calc-trigger-row" style={{ marginTop: 14 }}>
+            <button className="btn-primary" onClick={() => apply([d.date])}><Check size={15} /> Save this day's times</button>
+            <button className="btn-ghost" onClick={() => apply(planDates)}>Save all days</button>
+            <button className="btn-ghost" onClick={() => copyDay(d)}><Copy size={14} /> Copy as text</button>
+            {routeLink(d) && <a className="btn-ghost" href={routeLink(d)} target="_blank" rel="noreferrer"><MapIcon size={14} /> Whole route in Maps</a>}
+          </div>
+          <p className="calc-note">Saving writes each visit's date and time onto its lead (moved visits get their new day), so they show in the calendar here and on your iPhone. Nothing is sent to clients — you'd still tell them about any time that changed.</p>
+        </div>
+      )}
+
+      {allStops.length > 0 && (
+        <div className="panel">
+          <div className="panel-head"><Smartphone size={16} /><span>Texts and your phone</span></div>
+          <details open={showSms} onToggle={(e) => setShowSms(e.currentTarget.open)}>
+            <summary className="vp-summary-link">The "On my way" text</summary>
+            <p className="calc-note">Tapping <strong>On my way</strong> on a visit works out when you'll really arrive from where you are (it asks for your location), then opens Messages with this text, ready to send. It comes from your own number, so replies land in your Messages. Use <code>{"{name}"}</code> and <code>{"{eta}"}</code>.</p>
+            <textarea className="vp-sms" rows={3} value={saved.smsTemplate} onChange={(e) => patchSaved({ smsTemplate: e.target.value })} />
+            <button className="link-btn" onClick={() => patchSaved({ smsTemplate: DEFAULT_SMS })}>Reset to the original wording</button>
+          </details>
+          <details>
+            <summary className="vp-summary-link">Get client texts into the hub automatically (iPhone)</summary>
+            <ol className="vp-steps">
+              <li>On your iPhone open <strong>Shortcuts → Automation → +  → Message</strong>. Leave <em>Sender</em> blank (or pick contacts) and choose <strong>Run Immediately</strong>.</li>
+              <li>Add the action <strong>Get Contents of URL</strong>. URL: <code>{typeof window !== "undefined" ? `${window.location.origin}/api/leads/inbound-text` : "/api/leads/inbound-text"}</code></li>
+              <li>Method <strong>POST</strong>. Headers: <code>x-api-key</code> = your phone-agent key (the same one the voice agent uses), and <code>Content-Type</code> = <code>application/json</code>. Request body <strong>JSON</strong> with two fields: <code>from</code> = the message's <em>Sender</em> (phone number) and <code>text</code> = the message's <em>Content</em>.</li>
+              <li>That's it. When a client who is a lead texts you, the text is added to their notes and any "free from 3:30" style availability is picked up for the planner. Texts from anyone who isn't a lead are ignored and not stored.</li>
+            </ol>
+            <p className="calc-note">Or do it by hand any time with <strong>Paste a text</strong> on a visit (or in a lead).</p>
+          </details>
+        </div>
+      )}
+
+      {textFor && (
+        <TextImportModal
+          lead={leads.find((l) => l.id === textFor.leadId) || { name: textFor.name, notes: "" }}
+          onClose={() => setTextFor(null)}
+          onApply={(patch) => {
+            setLeads((rows) => rows.map((l) => (l.id === textFor.leadId ? { ...l, ...patch } : l)));
+            setNote(`Saved the text to ${textFor.name}'s notes${patch.visitDate ? " and set their visit day" : ""}.`);
+            setTextFor(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ---------- App shell ----------
 const TABS = [
   { key: "dashboard", label: "Board", icon: LayoutGrid },
   { key: "leads", label: "Leads", icon: Users },
+  { key: "visits", label: "Visit planner", icon: Route },
   { key: "clients", label: "Clients", icon: UserCircle },
   { key: "quotes", label: "Quotes", icon: FileText },
   { key: "invoices", label: "Invoices", icon: Receipt },
@@ -2577,6 +3104,7 @@ export default function HubApp() {
           <>
             {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
             {tab === "leads" && <Leads leads={leads} setLeads={setLeads} go={go} />}
+            {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
             {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}

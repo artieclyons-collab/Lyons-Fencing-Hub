@@ -54,6 +54,19 @@ Price lookup, job-photo scanning and route-distance estimating call the Anthropi
 
 The calendar button at the top of the hub gives a private subscription link (`/api/calendar/<token>.ics`). Subscribe once on the iPhone and Calendar shows job start dates (accepted quotes), site visits (set on a lead), quote follow-ups (3 days after a quote is marked Sent) and unpaid invoice due dates, each with reminders. It's read-only and iPhone refreshes subscribed calendars on its own schedule, so new entries aren't instant. The token is derived from `SUPABASE_SERVICE_ROLE_KEY`, so there's nothing extra to configure — but rotating that key changes the link, and anyone holding the link can see client names, phone numbers and addresses on it. The feed is built in `lib/calendarFeed.js`.
 
+## Visit planner
+
+The **Visit planner** tab plans each day of quote visits: the best order (north to south, finishing near Burleigh), a time for each, the drive between them, and what to move if a day is too full. It uses free services: OpenStreetMap to find addresses, and OSRM for real driving times (plus a 20% allowance for traffic, since it doesn't know live traffic). Rules and the maths are in `lib/visitPlanner.js`.
+
+- A lead with an address and a site visit date is planned. A lead with an address but no date gets placed on the best day. A name with a `?` after it is left out until confirmed.
+- Availability written in a lead's notes is respected: `Available from 3:30pm onwards.` or `Needs to be done before 2pm.` The **Not before** box on a visit writes that line for you. Lines starting `Text ` (pasted or forwarded messages) are a record only, never instructions.
+- Friday leaves Cleveland at 11am by default, and the plan leaves as late as it usefully can. Each day's start point, leave time and first-visit time can be changed on screen.
+- **Move to Saturday** shows what it saves. **Save this day's times** writes the date and time onto each lead, so they show in the calendar and the iPhone feed.
+
+**On my way:** works out your real ETA from your phone's location and opens Messages with a ready-to-send text from your own number (edit the wording under "Texts and your phone"). It can't send silently — a web page on an iPhone isn't allowed to — and a fully automatic send would need the Twilio number to be live.
+
+**Client texts into the hub:** `POST /api/leads/inbound-text` with header `x-api-key` (same key as the phone agent) and JSON `{ "from": "<sender number>", "text": "<message>" }`. If the number matches a lead the text is added to their notes and any availability in it is picked up; anything else is ignored and not stored. On the iPhone, a Shortcuts automation ("When I receive a message" → Get Contents of URL, POST, JSON body with `from` and `text`) forwards texts to it. You can also paste a text by hand with **Paste a text**.
+
 ## Phone home screen
 
 Open the deployed URL in Safari (iPhone) → Share → **Add to Home Screen**. The app ships a web manifest + icons, so it installs with the LF tile and runs full-screen.

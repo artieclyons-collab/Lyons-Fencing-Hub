@@ -376,3 +376,55 @@ html, body{ margin:0; padding:0; background:var(--bg); }
 .cal-cell.is-wet{ background:rgba(74,128,181,0.14); }
 .cal-rain{ display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:700; color:var(--text-dim); }
 .cal-rain.wx-wet, .cal-rain.wx-heavy{ color:#9CC3EA; }
+
+/* ---------- visit planner ---------- */
+.vp-modebar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.vp-seg{ display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.vp-seg button{ background:var(--surface); border:none; color:var(--text-dim); padding:8px 12px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+.vp-seg button.on{ background:var(--hivis); color:#1C1F1D; }
+.vp-days{ display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:12px; }
+.vp-day{
+  flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:8px 12px; cursor:pointer;
+  background:var(--surface); border:1px solid var(--line); border-radius:8px; color:var(--text); font-family:inherit;
+}
+.vp-day span{ font-size:11.5px; color:var(--text-dim); }
+.vp-day.on{ border-color:var(--hivis); background:var(--surface2); }
+.vp-day.warn{ border-color:var(--bad); }
+.vp-settings{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:6px; }
+.vp-summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px; margin:8px 0 12px; }
+.vp-summary div{ background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+.vp-summary span{ display:block; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; }
+.vp-summary strong{ font-family:'Barlow Condensed',sans-serif; font-size:20px; }
+.vp-compare{ background:rgba(232,185,35,0.1); border:1px solid var(--hivis); border-radius:8px; padding:8px 10px; color:var(--text); }
+.vp-leg{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); padding:6px 0 6px 10px; }
+.vp-stop{ display:flex; gap:12px; padding:10px 12px; background:var(--surface2); border:1px solid var(--line); border-left:3px solid var(--hivis); border-radius:8px; }
+.vp-stop.late{ border-left-color:var(--bad); }
+.vp-time{ display:flex; flex-direction:column; min-width:64px; }
+.vp-time strong{ font-family:'Barlow Condensed',sans-serif; font-size:20px; color:var(--hivis); line-height:1.1; }
+.vp-time span{ font-size:12px; color:var(--text-dim); }
+.vp-body{ flex:1; min-width:0; }
+.vp-name{ font-weight:600; font-size:14.5px; }
+.vp-type{ margin-left:8px; font-size:11px; font-weight:600; color:var(--text-dim); border:1px solid var(--line); border-radius:20px; padding:1px 8px; }
+.vp-badge{ margin-left:6px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:1px 7px; border-radius:20px; }
+.vp-badge.moved{ color:var(--bad); border:1px solid var(--bad); }
+.vp-badge.placed{ color:var(--good); border:1px solid var(--good); }
+.vp-addr{ font-size:12.5px; color:var(--text-dim); margin-top:2px; }
+.vp-was{ font-size:12px; color:var(--text-dim); margin-top:4px; }
+.vp-was.moved{ color:var(--hivis); font-weight:600; }
+.vp-actions{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.vp-actions a.btn-ghost{ text-decoration:none; }
+.vp-actions .btn-ghost.on{ border-color:var(--hivis); color:var(--hivis); }
+.vp-dur{ background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:5px 6px; color:var(--text-dim); font-size:12px; font-family:inherit; }
+.vp-left{ font-size:13px; padding:4px 0; color:var(--text-dim); }
+.vp-left strong{ color:var(--text); }
+
+/* ---------- visit planner: phone features ---------- */
+.vp-nb{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); }
+.vp-nb input{ background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:4px 6px; color:var(--text); font-size:12px; font-family:inherit; }
+.vp-summary-link{ cursor:pointer; font-weight:600; font-size:13.5px; padding:6px 0; }
+.vp-sms{ width:100%; background:var(--surface2); border:1px solid var(--line); border-radius:6px; padding:9px 10px; color:var(--text); font-size:13.5px; font-family:inherit; resize:vertical; }
+.vp-steps{ margin:8px 0; padding-left:20px; font-size:13px; color:var(--text-dim); line-height:1.5; }
+.vp-steps li{ margin-bottom:6px; }
+.vp-steps code, .panel code{ font-family:inherit; background:var(--surface2); border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px; word-break:break-all; }
+.vp-actions .btn-ghost, .vp-actions .btn-primary{ white-space:normal; text-align:left; max-width:100%; }
+.vp-body{ overflow-wrap:anywhere; }
