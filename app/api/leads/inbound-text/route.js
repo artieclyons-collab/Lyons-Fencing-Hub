@@ -43,9 +43,12 @@ export async function POST(req) {
 
   const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,notes").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const norm = (s) => String(s || "").replace(/\?/g, "").trim().toLowerCase();
-  const named = byName ? (leads || []).filter((l) => norm(l.name) === norm(rawFrom)) : [];
+  // Names compare on letters and digits only, so emoji, spacing and punctuation ("Em ❤️" vs "Em") never get in the way.
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const named = byName && norm(rawFrom) ? (leads || []).filter((l) => norm(l.name) === norm(rawFrom)) : [];
   const lead = byName ? (named.length === 1 ? named[0] : null) : (leads || []).find((l) => tail(l.phone) === from);
+  // Vercel's log shows why a text wasn't matched (never the message, and only the last 3 digits of a number).
+  if (!lead) console.log(`inbound-text: no lead for ${byName ? `name "${rawFrom}" (${named.length} matches)` : `number ending ${from.slice(-3)}`}`);
   if (!lead) return NextResponse.json({ ok: true, matched: false }); // not a lead: drop it, store nothing
 
   const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
