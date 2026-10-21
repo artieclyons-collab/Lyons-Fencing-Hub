@@ -67,6 +67,8 @@ The **Visit planner** tab plans each day of quote visits: the best order (north 
 
 **Client texts into the hub:** `POST /api/leads/inbound-text` with header `x-api-key` (same key as the phone agent) and JSON `{ "from": "<sender number>", "text": "<message>" }`. If the number matches a lead the text is added to their notes and any availability in it is picked up; anything else is ignored and not stored. On the iPhone, a Shortcuts automation ("When I receive a message" → Get Contents of URL, POST, JSON body with `from` and `text`) forwards texts to it. You can also paste a text by hand with **Paste a text**.
 
+**Cancellations:** if a forwarded or pasted text sounds like the client no longer wants the quote ("don't need a quote anymore", "decided not to go ahead", "already found someone"), the Visit planner shows a **May have cancelled** panel and the Board gets a red attention row. Nothing is removed automatically — tap **Yes, take them out** (marks the lead Lost with a note, which drops them from the plan) or **No, still on** (adds a "Checked:" line so it stops flagging). Texts about moving the visit ("can we do Monday instead") aren't flagged. Each visit also has **Edit lead** and **Cancelled** (Mark lost / Delete / Keep) buttons. Detection lives in `lib/availability.js`.
+
 ## Phone home screen
 
 Open the deployed URL in Safari (iPhone) → Share → **Add to Home Screen**. The app ships a web manifest + icons, so it installs with the LF tile and runs full-screen.

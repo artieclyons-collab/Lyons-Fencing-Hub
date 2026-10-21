@@ -33,7 +33,7 @@ import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import { collectVisits } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
-import { parseAvailability, parseDay, withAvailability, parseNotesAvailability } from "@/lib/availability";
+import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint } from "@/lib/availability";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -592,6 +592,12 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
     attention.push({ key: "leads", icon: Users, tab: "leads",
       text: `${plural(newLeads.length, "new lead")} to contact${phoneLeads ? ` (${phoneLeads} from the phone agent)` : ""}`,
       sub: names(newLeads, (l) => l.name) });
+  }
+  const maybeCancelled = leads.filter((l) => (l.status === "New" || l.status === "Contacted") && cancellationHint(l.notes));
+  if (maybeCancelled.length > 0) {
+    attention.push({ key: "cancel", bad: true, icon: AlertTriangle, tab: "visits",
+      text: `${plural(maybeCancelled.length, "client")} may have cancelled by text — check before you drive out`,
+      sub: names(maybeCancelled, (l) => String(l.name || "").replace(/\?/g, "").trim()) });
   }
   if (acceptedNoDate.length > 0) {
     attention.push({ key: "nodate", icon: CalendarDays, onClick: () => setScheduleOpen(true),
@@ -2689,6 +2695,26 @@ function VisitPlanner({ leads, quotes, setLeads }) {
   };
 
   // ----- things you can change on a visit -----
+  const [editLead, setEditLead] = useState(null); // the lead being edited from the planner
+  const [askRemove, setAskRemove] = useState(null); // stop id waiting for "mark lost / delete / keep"
+  const todayLabel = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  // Cancelling: "lost" keeps the lead (greyed out, with a note) and takes it out of the plan; "delete" removes it completely.
+  const removeVisit = (s, how) => {
+    if (how === "delete") {
+      setLeads((rows) => rows.filter((l) => l.id !== s.leadId));
+      setNote(`Deleted ${s.name} from your leads — they're out of the plan.`);
+    } else {
+      setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, status: "Lost", notes: [String(l.notes || "").trim(), `Cancelled: no longer wants a quote (${todayLabel}).`].filter(Boolean).join("\n") } : l)));
+      setNote(`${s.name} is marked Lost and out of the plan. You can bring them back from the Leads tab.`);
+    }
+    setAskRemove(null);
+  };
+  // "Checked: ..." after a flagged text means you've looked at it and they're still on.
+  const keepVisit = (s) => {
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, notes: [String(l.notes || "").trim(), `Checked: still wants a quote (${todayLabel}).`].filter(Boolean).join("\n") } : l)));
+    setNote(`Okay — ${s.name} stays in the plan.`);
+  };
+  const cancelHints = allStops.map((s) => ({ s, text: cancellationHint(s.notes) })).filter((h) => h.text);
   const [textFor, setTextFor] = useState(null); // the stop whose text message is being pasted
   const [busyStop, setBusyStop] = useState(null);
   const [showSms, setShowSms] = useState(false);
@@ -2789,6 +2815,22 @@ function VisitPlanner({ leads, quotes, setLeads }) {
         <p className="calc-note">The routing service is busy, so these drive times are straight-line estimates, not real roads. Treat them as rough.</p>
       )}
       {note && <p className="calc-note" style={{ color: "var(--good)" }}>{note}</p>}
+
+      {cancelHints.length > 0 && (
+        <div className="panel vp-cancel">
+          <div className="panel-head"><AlertTriangle size={16} /><span>May have cancelled</span></div>
+          {cancelHints.map(({ s, text }) => (
+            <div key={s.id} className="vp-cancel-row">
+              <div><strong>{s.name}</strong> texted: “{text.length > 140 ? `${text.slice(0, 140)}…` : text}”</div>
+              <div className="vp-actions">
+                <button className="btn-primary small" onClick={() => removeVisit(s, "lost")}>Yes — take them out</button>
+                <button className="btn-ghost small" onClick={() => keepVisit(s)}>No, still on</button>
+              </div>
+            </div>
+          ))}
+          <p className="calc-note" style={{ marginBottom: 0 }}>I only flag it — nobody is removed until you say so.</p>
+        </div>
+      )}
 
       {(left.length > 0 || missing.length > 0 || (planned?.notes || []).length > 0) && (
         <div className="panel">
@@ -2919,6 +2961,17 @@ function VisitPlanner({ leads, quotes, setLeads }) {
                           {[10, 15, 20, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
                         </select>
                         <button className="btn-ghost small" onClick={() => setTextFor(s)}><ClipboardPaste size={13} /> Paste a text</button>
+                        <button className="btn-ghost small" onClick={() => setEditLead(leads.find((l) => l.id === s.leadId) || null)}>Edit lead</button>
+                        {askRemove === s.id ? (
+                          <span className="vp-confirm">
+                            Take {firstName(s.name) || "them"} out?
+                            <button className="btn-primary small" onClick={() => removeVisit(s, "lost")} title="Keeps the lead, marked Lost">Mark lost</button>
+                            <button className="btn-danger small" onClick={() => removeVisit(s, "delete")} title="Removes the lead completely">Delete</button>
+                            <button className="btn-ghost small" onClick={() => setAskRemove(null)}>Keep</button>
+                          </span>
+                        ) : (
+                          <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Cancelled</button>
+                        )}
                         {!d.saturday && d.stops.length > 1 && (
                           <button className="btn-ghost small" onClick={() => moveStop(s, nextSaturdayIso(d.date))}>
                             Move to Saturday{d.moveSavings?.[s.id]?.driveMin >= 3 ? ` (saves ${Math.round(d.moveSavings[s.id].driveMin)} min driving${d.moveSavings[s.id].finishMin >= 10 ? `, home ${Math.round(d.moveSavings[s.id].finishMin)} min earlier` : ""})` : ""}
@@ -2968,6 +3021,16 @@ function VisitPlanner({ leads, quotes, setLeads }) {
             <p className="calc-note">Or do it by hand any time with <strong>Paste a text</strong> on a visit (or in a lead).</p>
           </details>
         </div>
+      )}
+
+      {editLead && (
+        <LeadModal
+          initial={editLead}
+          onClose={() => setEditLead(null)}
+          onSave={(data) => { setLeads((rows) => rows.map((l) => (l.id === data.id ? data : l))); setEditLead(null); }}
+          onDelete={() => { setLeads((rows) => rows.filter((l) => l.id !== editLead.id)); setEditLead(null); }}
+          onQuote={null}
+        />
       )}
 
       {textFor && (
