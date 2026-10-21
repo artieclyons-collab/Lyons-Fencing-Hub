@@ -6,6 +6,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_TABLES = new Set(Object.keys(TABLE_COLUMNS));
+// Data changes constantly (and from several devices) — never let a browser or CDN reuse an old copy.
+const NO_STORE = { headers: { "Cache-Control": "no-store" } };
 
 export async function GET(req, { params }) {
   const { table } = await params;
@@ -15,12 +17,12 @@ export async function GET(req, { params }) {
   if (table === "settings") {
     const { data, error } = await supabaseAdmin.from("settings").select("*").limit(1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ rows: data || [] });
+    return NextResponse.json({ rows: data || [] }, NO_STORE);
   }
 
   const { data, error } = await supabaseAdmin.from(table).select("*").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rows: data || [] });
+  return NextResponse.json({ rows: data || [] }, NO_STORE);
 }
 
 export async function PUT(req, { params }) {
