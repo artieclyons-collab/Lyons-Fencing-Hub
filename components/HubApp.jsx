@@ -9,7 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone,
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2,
 } from "lucide-react";
 
 import {
@@ -3153,6 +3153,49 @@ export default function HubApp() {
 
   const allLoaded = leadsLoaded && quotesLoaded && invoicesLoaded && materialsLoaded && expensesLoaded && settingsLoaded;
 
+  // ----- Undo for deletes -----
+  // lib/storage.js announces every delete made in the app ("hub-deleted"). They're kept for two weeks (on this device) so a
+  // lead, quote or invoice deleted by accident can be put back, right away from the Undo bar or later from the header button.
+  const TRASH_KEY = "lyons:trash";
+  const TRASH_DAYS = 14;
+  const [trash, setTrash] = useState([]);
+  const [toast, setToast] = useState(null); // the delete the Undo bar is offering right now
+  const [trashOpen, setTrashOpen] = useState(false);
+  const trashSkipFirstSave = useRef(true);
+  useEffect(() => {
+    const cutoff = Date.now() - TRASH_DAYS * 86400000;
+    try { setTrash((JSON.parse(window.localStorage.getItem(TRASH_KEY) || "[]") || []).filter((t) => t.at > cutoff).slice(0, 60)); } catch {}
+  }, []);
+  useEffect(() => {
+    if (trashSkipFirstSave.current) { trashSkipFirstSave.current = false; return; } // the empty list before it has been read back
+    try { window.localStorage.setItem(TRASH_KEY, JSON.stringify(trash)); } catch {}
+  }, [trash]);
+  useEffect(() => {
+    const label = (table, r) => [r.name || r.clientName || r.description || r.title || (table === "expenses" ? r.category : "") || "Item", r.docNumber].filter(Boolean).join(" ");
+    const noun = { leads: "lead", quotes: "quote", invoices: "invoice", materials: "material", expenses: "expense" };
+    const onDeleted = (e) => {
+      const { table, rows } = e.detail || {};
+      if (!noun[table] || !rows?.length) return;
+      const entries = rows.map((r) => ({ key: `${table}:${r.id}:${Date.now()}`, table, kind: noun[table], label: label(table, r), row: r, at: Date.now() }));
+      setTrash((t) => [...entries, ...t].slice(0, 60));
+      setToast({ key: entries[0].key, text: rows.length === 1 ? `Deleted ${noun[table]} “${entries[0].label}”` : `Deleted ${rows.length} ${noun[table]}s`, entries });
+    };
+    window.addEventListener("hub-deleted", onDeleted);
+    return () => window.removeEventListener("hub-deleted", onDeleted);
+  }, []);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 12000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const restore = (entries) => {
+    const setters = { leads: setLeads, quotes: setQuotes, invoices: setInvoices, materials: setMaterials, expenses: setExpenses };
+    for (const en of entries) setters[en.table]((rows) => (rows.some((r) => r.id === en.row.id) ? rows : [en.row, ...rows]));
+    const gone = new Set(entries.map((e) => e.key));
+    setTrash((t) => t.filter((x) => !gone.has(x.key)));
+    setToast(null);
+  };
+
   const go = (t, opts) => {
     setTab(t);
     if (opts?.newFromLead) setPendingNewFrom(opts.newFromLead);
@@ -3206,6 +3249,10 @@ export default function HubApp() {
             <div className="brand-sub">Business hub</div>
           </div>
         </div>
+        <button className="icon-btn settings-btn undo-btn" onClick={() => setTrashOpen(true)} title="Recently deleted — put things back">
+          <Undo2 size={18} />
+          {trash.length > 0 && <span className="undo-count">{trash.length > 9 ? "9+" : trash.length}</span>}
+        </button>
         <button className="icon-btn settings-btn" onClick={() => setCalendarOpen(true)} title="iPhone calendar"><CalendarDays size={18} /></button>
         <button className="icon-btn settings-btn" onClick={handleExportData} title="Export all data"><Download size={18} /></button>
         <button className="icon-btn settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
@@ -3238,6 +3285,33 @@ export default function HubApp() {
         )}
       </main>
 
+      {toast && (
+        <div className="undo-toast" role="status">
+          <span>{toast.text}</span>
+          <button onClick={() => restore(toast.entries)}><Undo2 size={15} /> Undo</button>
+          <button className="undo-x" onClick={() => setToast(null)} aria-label="Dismiss"><X size={15} /></button>
+        </div>
+      )}
+      {trashOpen && (
+        <Modal title="Recently deleted" onClose={() => setTrashOpen(false)}>
+          {trash.length === 0 ? (
+            <p className="calc-note">Nothing deleted recently. Anything you delete is kept here for {TRASH_DAYS} days so you can put it back.</p>
+          ) : (
+            <>
+              <p className="calc-note">Kept for {TRASH_DAYS} days on this device. Restore puts it back exactly as it was.</p>
+              {trash.map((t) => (
+                <div key={t.key} className="trash-row">
+                  <div>
+                    <strong>{t.label}</strong>
+                    <span>{t.kind} · deleted {new Date(t.at).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</span>
+                  </div>
+                  <button className="btn-primary small" onClick={() => restore([t])}><Undo2 size={13} /> Restore</button>
+                </div>
+              ))}
+            </>
+          )}
+        </Modal>
+      )}
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />}
     </div>
