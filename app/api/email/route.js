@@ -51,6 +51,16 @@ export async function GET() {
 }
 
 export async function POST(req) {
+  // Whatever goes wrong, answer with a readable reason (and log it) rather than a bare server error.
+  try {
+    return await handle(req);
+  } catch (e) {
+    console.error("email route failed:", e?.stack || e);
+    return NextResponse.json({ error: `Something went wrong: ${e?.message || e}` }, { status: 500 });
+  }
+}
+
+async function handle(req) {
   if (!sameOrigin(req)) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database not configured" }, { status: 501 });
 
