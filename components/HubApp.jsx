@@ -24,12 +24,13 @@ import {
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
 import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
 import { lookupSuburb } from "@/lib/geocode";
-import { scheduleEvents, addDaysIso, FOLLOW_UP_DAYS } from "@/lib/schedule";
+import { scheduleEvents, addDaysIso } from "@/lib/schedule";
 import {
   estimateHours, hoursLabel, jobDays, suggestSchedule, dayLoads, worksSaturday, isWorkDay, isIsoDate, HOURS_PER_DAY, shiftWorkDays,
 } from "@/lib/jobSchedule";
 import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
+import TextsToSend from "./TextsToSend";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
@@ -536,10 +537,6 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quotes]);
-  // Follow-ups are worth chasing for about a month; anything older is probably dead and just clutters the list.
-  const needsFollowUp = quotes
-    .filter((q) => q.status === "Sent" && daysSince(q.date) >= FOLLOW_UP_DAYS && daysSince(q.date) <= 30)
-    .sort((a, b) => daysSince(b.date) - daysSince(a.date));
   const staleQuotes = quotes.filter((q) => q.status === "Sent" && daysSince(q.date) > 30);
 
   // ----- schedule: next 2 weeks by day, plus the next few far-off jobs/visits -----
@@ -714,32 +711,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         )}
       </div>
 
-      {needsFollowUp.length > 0 && (
-        <div className="panel">
-          <div className="panel-head">
-            <Phone size={16} />
-            <span>Worth a follow-up</span>
-          </div>
-          <p className="calc-note" style={{ marginBottom: 10 }}>Sent, no response yet — the message's drafted, just tap to open it in Messages and send if it still looks right.</p>
-          {needsFollowUp.map((q) => {
-            const body = `Hi ${q.clientName}, just following up on the fencing quote (${q.docNumber}) I sent through ${daysSince(q.date)} days ago — let me know if you had any questions or want to go ahead. Cheers, Artie.`;
-            return (
-              <div key={q.id} className="upcoming-row">
-                <div className="upcoming-date">{daysSince(q.date)}d</div>
-                <div style={{ flex: 1 }}>
-                  <div className="upcoming-name">{q.clientName}</div>
-                  <div className="upcoming-sub">{q.jobType} · {money(inc(q.items))} inc. GST</div>
-                </div>
-                {q.clientPhone ? (
-                  <a className="btn-ghost small" href={`sms:${q.clientPhone}?body=${encodeURIComponent(body)}`}>Draft text</a>
-                ) : (
-                  <span className="calc-note" style={{ marginTop: 0 }}>Add phone</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} />
 
       <div className="panel">
         <div className="panel-head">
@@ -3237,7 +3209,7 @@ export default function HubApp() {
           <AlertTriangle size={16} />
           <span>
             Saved, but your database needs a small update first, so {[...new Set(Object.values(skippedCols).flat())].join(", ")} {Object.values(skippedCols).flat().length === 1 ? "wasn't" : "weren't"} kept.
-            <small>Run the pending SQL update in Supabase (supabase/migration-6-job-duration.sql) and it'll save from then on.</small>
+            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
           </span>
         </div>
       )}

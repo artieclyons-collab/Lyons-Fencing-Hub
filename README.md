@@ -79,3 +79,7 @@ Open the deployed URL in Safari (iPhone) → Share → **Add to Home Screen**. T
 
 - No login screen (single-user tool, per the brief) — but the database itself is locked down independently of that (see "How data access works"). The app URL isn't a secret either way; anyone with it can use the hub as if they were you, since there's no login. Don't share the URL publicly.
 - PDF export locally uses your installed Chrome/Edge; on Vercel it uses a bundled serverless Chromium.
+
+## Texts to send (Board)
+
+The Board's **Texts to send** panel lists quote follow-ups (3 days after a quote is Sent, again every 7 days up to a month) and invoice chasers (7 days after an invoice is issued, again every 7 days until it's Paid). Each has a button that opens a ready-written text in Messages from your own number — a web page can't send it for you — then asks "Did you send it?" and only then hides it until it's due again. The wording can be edited (**Edit wording**, saved on that device). Run `supabase/migration-7-text-reminders.sql` once so "sent" is remembered; until then the texts work but keep showing.
