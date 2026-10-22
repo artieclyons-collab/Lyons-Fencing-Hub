@@ -9,7 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2,
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail,
 } from "lucide-react";
 
 import {
@@ -31,6 +31,7 @@ import {
 import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
+import EmailModal from "./EmailModal";
 import DaySheet from "./DaySheet";
 import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
@@ -1154,6 +1155,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
       id: uid(),
       docNumber,
       clientName: q.clientName,
+      clientEmail: q.clientEmail || "",
       address: q.address,
       suburb: q.suburb,
       jobType: q.jobType,
@@ -1180,6 +1182,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
       id: uid(),
       docNumber,
       clientName: q.clientName,
+      clientEmail: q.clientEmail || "",
       address: q.address,
       suburb: q.suburb,
       jobType: q.jobType,
@@ -1343,6 +1346,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showEmail, setShowEmail] = useState(false);
   const [scanPrefill, setScanPrefill] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -1504,7 +1508,10 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
-      <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
+      <div className="field-pair">
+        <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
+        <Field label="Client email (to send the quote)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
+      </div>
       <Field label="Quote date (the quote is valid for 3 months from this date)"><input type="date" value={form.date || ""} onChange={(e) => set("date", e.target.value)} style={{ maxWidth: 200 }} /></Field>
       <div className="field-pair">
         <Field label="Job type">
@@ -1730,6 +1737,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
+        {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved quote with the PDF attached"><Mail size={15} /> Email quote</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
       {linkFallback && (
@@ -1737,6 +1745,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       )}
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
+      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} />}
     </Modal>
   );
 }
@@ -1815,6 +1824,7 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
 }
 
 function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
+  const [showEmail, setShowEmail] = useState(false);
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
   const [lookingUpSuburb, setLookingUpSuburb] = useState(false);
@@ -1843,6 +1853,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
+      <Field label="Client email (to send the invoice)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
       <Field label="Street address">
         <div className="calc-trigger-row">
           <input value={form.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="e.g. 107 Leyte Ave" style={{ flex: 1 }} />
@@ -1877,10 +1888,12 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {onMarkPaid && <button className="btn-ghost" onClick={onMarkPaid}><Check size={15} /> Mark paid</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
+        {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved invoice with the PDF attached"><Mail size={15} /> Email invoice</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
 
       {showPreview && <DocumentPreviewModal type="invoice" data={form} onClose={() => setShowPreview(false)} />}
+      {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} />}
     </Modal>
   );
 }

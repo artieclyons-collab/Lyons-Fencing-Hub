@@ -124,3 +124,14 @@ When a day is too full the planner now suggests concrete fixes ("Suggestions" pa
 ## What a client's text changes (and doesn't)
 
 A text forwarded from the iPhone (or pasted with **Paste a text**) no longer gets copied into the lead's notes. Only the useful part is used: a street address replaces the lead's address (a changed street address leaves a one-line "Address changed by text (was: …)"), availability ("home by 3pm", "free from 3:30", "before 2") updates the "Available from…" line the planner reads, and a cancellation or a request to move the visit is kept as a short record so the planner and Board can flag it. Everything else ("ok thanks", "see you then") is ignored. "home/back/free by 3" means *from* 3; "done by 3" means *before* 3.
+
+## Emailing clients (from the business Gmail)
+
+**Email quote** (in a saved quote), **Email invoice** (in a saved invoice) and an **Email** button on each row in the Board's *Texts to send* (quote follow-ups, start-date emails and payment reminders) open a preview — who it goes to, the subject and the message (editable) — and nothing is sent until you tap Send. Quotes and invoices go with the PDF attached (a quote also has the online view-and-accept link; an invoice has your bank details). Sending a draft quote marks it Sent; sending a follow-up/reminder is recorded like the text version, so it drops off the list.
+
+The address always comes from the email saved on that quote/invoice (copied from the lead when you "Start quote"; invoices copy it from their quote), or failing that the matching lead's email — never from the request. The endpoint only accepts calls from the hub's own pages, won't re-send the same document within 2 minutes, and stops at 40 emails a day (a no-login hub shouldn't be able to be used to email people from your business account). Code: `lib/email.js` (wording + sending), `app/api/email/route.js`, `components/EmailModal.jsx`.
+
+**One-off setup**
+1. Run `supabase/migration-8-email.sql` in the Supabase SQL Editor (adds `clientEmail` and `lastEmailed` to quotes and invoices).
+2. On the business Google account (Lyonsfencingservices@gmail.com): turn on **2-Step Verification** (Google Account → Security), then **Security → App passwords** → create one (name it "Lyons Fencing Hub"). Google shows a 16-character password.
+3. Vercel → Settings → Environment Variables: `GMAIL_USER` = `Lyonsfencingservices@gmail.com` and `GMAIL_APP_PASSWORD` = the 16 characters. Redeploy.

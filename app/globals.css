@@ -492,3 +492,9 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .vp-suggest{ border-color:var(--hivis); }
 .vp-sug{ padding:10px 0; border-top:1px solid var(--line); }
 .vp-sug:first-of-type{ border-top:none; }
+
+/* Email modal */
+.email-meta{ display:flex; flex-direction:column; gap:4px; padding:10px 12px; margin-bottom:12px; background:var(--surface2); border:1px solid var(--line); border-radius:8px; font-size:13px; }
+.email-meta div{ display:flex; gap:10px; flex-wrap:wrap; }
+.email-meta span{ color:var(--text-dim); min-width:64px; }
+.email-meta strong{ font-weight:600; word-break:break-all; }

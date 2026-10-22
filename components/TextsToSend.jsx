@@ -3,7 +3,8 @@
 // Messages from Artie's own number. It can't send by itself (a web page can't), so after the tap it asks "did you
 // send it?" and only then marks it done, so it stops showing until it's due again.
 import { useState, useEffect, useMemo } from "react";
-import { Send, Copy, Check, Pencil, X, Phone } from "lucide-react";
+import { Send, Copy, Check, Pencil, X, Phone, Mail } from "lucide-react";
+import EmailModal from "./EmailModal";
 import { money, today, itemsTotal, gstBreakdown, isDepositInvoice } from "@/lib/logic";
 import { isIsoDate } from "@/lib/jobSchedule";
 import { FOLLOW_UP_DAYS } from "@/lib/schedule";
@@ -31,6 +32,8 @@ const first = (name) => {
   const n = String(name || "").replace(/\(.*?\)/g, "").trim().split(/\s+/)[0] || "";
   return /^(n\/?a|lead|client)$/i.test(n) ? "" : n;
 };
+const emailKind = { quote: "followup", job: "start", invoice: "chase" };
+const isEmailish = (s) => /^[^s@]+@[^s@]+.[^s@]{2,}$/.test(String(s || "").trim());
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 const incTotal = (items) => gstBreakdown(itemsTotal(items)).total;
 const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/^Hi ,/, "Hi,");
@@ -42,6 +45,15 @@ const smsLink = (phone, body) => {
 // Everything due right now, oldest first. `texts` is the wording; leads/quotes supply phone numbers for invoices.
 export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
   const out = [];
+  // Where an email would go: the address saved on the document, else on the matching lead (by phone or name).
+  const emailFor = (doc) => {
+    if (isEmailish(doc.clientEmail)) return doc.clientEmail.trim();
+    const q = doc.quoteId ? quotes.find((x) => x.id === doc.quoteId) : null;
+    if (q && isEmailish(q.clientEmail)) return q.clientEmail.trim();
+    const phone = String(doc.clientPhone || q?.clientPhone || "").replace(/D/g, "").slice(-9);
+    const l = leads.find((x) => isEmailish(x.email) && ((phone.length >= 8 && String(x.phone || "").replace(/D/g, "").slice(-9) === phone) || norm(x.name) === norm(doc.clientName)));
+    return l ? l.email.trim() : "";
+  };
   for (const q of quotes) {
     if (q.status !== "Sent") continue;
     const age = daysAgo(q.date);
@@ -49,7 +61,7 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     const since = daysAgo(q.lastFollowUp);
     if (since != null && since < REPEAT_DAYS) continue;
     const body = fill(texts.followUp, { name: first(q.clientName), doc: q.docNumber || "quote", days: age, total: money(incTotal(q.items)), job: q.jobType || "fencing" });
-    out.push({ key: `q:${q.id}`, kind: "quote", id: q.id, age, badge: `${age}d`, mark: { field: "lastFollowUp", value: today() }, who: q.clientName || "Client", what: `${q.jobType || "Quote"} · ${money(incTotal(q.items))} inc. GST`, label: since != null ? "Follow up again" : "Follow up", phone: q.clientPhone || "", body });
+    out.push({ key: `q:${q.id}`, kind: "quote", email: emailFor(q), id: q.id, age, badge: `${age}d`, mark: { field: "lastFollowUp", value: today() }, who: q.clientName || "Client", what: `${q.jobType || "Quote"} · ${money(incTotal(q.items))} inc. GST`, label: since != null ? "Follow up again" : "Follow up", phone: q.clientPhone || "", body });
   }
   // A booked job: tell the client the start date, and again if the date moves (it's remembered as "start:<date>").
   const t0 = today();
@@ -61,7 +73,7 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     if (told === `start:${q.startDate}`) continue;
     const changed = told.startsWith("start:");
     const body = fill(changed ? texts.startChange : texts.startConfirm, { name: first(q.clientName), doc: q.docNumber || "quote", date: longDate(q.startDate), total: money(incTotal(q.items)), job: q.jobType || "fencing" });
-    out.push({ key: `s:${q.id}`, kind: "job", id: q.id, age: -until, badge: until === 0 ? "today" : `in ${until}d`, mark: { field: "lastFollowUp", value: `start:${q.startDate}` }, who: q.clientName || "Client", what: `${q.jobType || "Job"} · starts ${longDate(q.startDate)}`, label: changed ? "Send new date" : "Confirm start", phone: q.clientPhone || "", body });
+    out.push({ key: `s:${q.id}`, kind: "job", email: emailFor(q), id: q.id, age: -until, badge: until === 0 ? "today" : `in ${until}d`, mark: { field: "lastFollowUp", value: `start:${q.startDate}` }, who: q.clientName || "Client", what: `${q.jobType || "Job"} · starts ${longDate(q.startDate)}`, label: changed ? "Send new date" : "Confirm start", phone: q.clientPhone || "", body });
   }
   const phoneFor = (inv) => {
     const q = quotes.find((x) => x.id === inv.quoteId) || quotes.find((x) => x.clientPhone && norm(x.clientName) === norm(inv.clientName));
@@ -77,7 +89,7 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     const total = money(incTotal(i.items));
     const what = `${isDepositInvoice(i) ? "the deposit invoice" : "invoice"}${i.docNumber ? ` ${i.docNumber}` : ""}`;
     const body = fill(texts.chase, { name: first(i.clientName), doc: i.docNumber || "invoice", what, total, days: age });
-    out.push({ key: `i:${i.id}`, kind: "invoice", id: i.id, age, badge: `${age}d`, mark: { field: "lastChase", value: today() }, who: i.clientName || "Client", what: `${i.docNumber || "Invoice"} · ${total} inc. GST`, label: since != null ? "Chase again" : "Chase payment", phone: phoneFor(i), body });
+    out.push({ key: `i:${i.id}`, kind: "invoice", email: emailFor(i), id: i.id, age, badge: `${age}d`, mark: { field: "lastChase", value: today() }, who: i.clientName || "Client", what: `${i.docNumber || "Invoice"} · ${total} inc. GST`, label: since != null ? "Chase again" : "Chase payment", phone: phoneFor(i), body });
   }
   // Start dates first (soonest first), then the rest oldest first.
   const rank = (x) => (x.kind === "job" ? 0 : 1);
@@ -90,6 +102,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
   const [pending, setPending] = useState(null); // key waiting for "did you send it?"
   const [copied, setCopied] = useState(null);
   const [showAll, setShowAll] = useState(false);
+  const [emailing, setEmailing] = useState(null); // the item whose email is being prepared
   useEffect(() => {
     try { setTexts({ ...DEFAULT_TEXTS, ...(JSON.parse(window.localStorage.getItem(TEXTS_KEY) || "{}") || {}) }); } catch {}
   }, []);
@@ -148,6 +161,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
                 ) : (
                   <span className="calc-note" style={{ margin: 0 }}><Phone size={12} /> No phone number on file</span>
                 )}
+                {item.email && <button className="btn-ghost small" onClick={() => setEmailing(item)} title={`Email ${item.email}`}><Mail size={13} /> Email</button>}
                 <button className="btn-ghost small" onClick={() => copy(item)}>{copied === item.key ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy text</>}</button>
                 <button className="btn-ghost small" onClick={() => markDone(item)} title="Already dealt with it another way">Done</button>
               </div>
@@ -158,6 +172,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
       {due.length > SHOW_FIRST && (
         <button className="link-btn" style={{ marginTop: 10 }} onClick={() => setShowAll((v) => !v)}>{showAll ? "Show fewer" : `Show ${due.length - SHOW_FIRST} more`}</button>
       )}
+      {emailing && <EmailModal kind={emailKind[emailing.kind]} id={emailing.id} title={`Email ${emailing.who}`} onClose={() => setEmailing(null)} />}
       {editing && <WordingModal texts={texts} onSave={(t) => { saveTexts(t); setEditing(false); }} onClose={() => setEditing(false)} />}
     </div>
   );
