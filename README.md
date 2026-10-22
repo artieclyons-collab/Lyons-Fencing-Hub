@@ -95,3 +95,16 @@ A panel near the top of the Board shows one day at a time (Today before 3pm, Tom
 ## Booking a job in (quote accepted)
 
 Setting a quote to **Accepted** (or a client accepting it online) drops it into the next free working days after your booked jobs — and now **skips days the forecast says are wet** (heavy 15mm+ or wet 5mm+; the forecast reaches about 2 weeks). The same applies in the "Schedule accepted jobs" dialog. The date is only a suggestion — change it on the quote or the Board calendar. Once a job has a start date within 14 days, **Texts to send** offers a one-tap "you're booked in for …" text, and a "your start date has changed to …" text if you later move it (what the client was last told is remembered on the quote as `start:<date>` in `lastFollowUp`).
+
+## Two-way calendar (hub ⇄ Google Calendar ⇄ iPhone)
+
+A calendar *subscription* (the older iPhone link above) is read-only. For changes to go both ways, the hub keeps a Google Calendar in step and the iPhone Calendar app syncs with that. Jobs, site visits (with times), quote follow-ups and invoice due dates are mirrored. Move one on the phone and the hub's date/time changes; change it in the hub and the calendar follows. If both changed, the hub wins. Delete an entry on the phone and it stays deleted (the job/visit in the hub is untouched). A visit/job that no longer exists in the hub (lead lost, invoice paid) is removed from the calendar. The sync runs while the hub is open (on open, on coming back to it, every 2 minutes, and a few seconds after you save) and via the **Sync now** button in the calendar screen (top bar → calendar icon). Code: `lib/googleSync.js` (what to change), `lib/googleCalendar.js` (the API), `app/api/calendar/sync/route.js`.
+
+**One-off setup**
+1. [console.cloud.google.com](https://console.cloud.google.com) → create a project (e.g. "Lyons Fencing Hub").
+2. **APIs & Services → Library** → search **Google Calendar API** → **Enable**.
+3. **IAM & Admin → Service Accounts → Create service account** (any name, skip the optional steps). Open it → **Keys → Add key → Create new key → JSON**. A file downloads — keep it private.
+4. [calendar.google.com](https://calendar.google.com) → **Other calendars +** → **Create new calendar** (name it "Lyons Fencing Hub"). Open its **Settings → Share with specific people or groups → Add**: paste the `client_email` from the JSON file and give it **Make changes to events**. On the same settings page, copy the **Calendar ID** (under *Integrate calendar*).
+5. Vercel → project → **Settings → Environment Variables**: `GOOGLE_SERVICE_ACCOUNT_JSON` = the whole contents of the JSON file, and `GOOGLE_CALENDAR_ID` = the Calendar ID. Redeploy.
+6. iPhone: **Settings → Calendar → Accounts → Add Account → Google**, sign in, and make sure *Calendar* is on. In the Calendar app tick **Lyons Fencing Hub** under *Calendars* (if it isn't listed, tick it at calendar.google.com/calendar/u/0/syncselect).
+7. Remove the older subscribed "Lyons Fencing Hub" calendar from the iPhone (Settings → Calendar → Accounts → Subscribed Calendars), or every entry shows twice.

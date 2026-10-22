@@ -2357,6 +2357,103 @@ function ExpenseModal({ initial, onClose, onSave, onDelete }) {
 }
 
 // Private calendar feed for the iPhone — see app/api/calendar and lib/calendarFeed.js.
+// Keeps the hub and the Google Calendar in step while the hub is open (only if Google Calendar has been set up).
+// Runs when the hub opens, when you come back to it, every couple of minutes, and a few seconds after a save.
+// When the phone changed something, the lists reload so you see it.
+function GoogleSyncRunner() {
+  useEffect(() => {
+    let off = false;
+    let enabled = false;
+    let busy = false;
+    let timer = null;
+    const sync = async () => {
+      if (off || !enabled || busy || document.hidden) return;
+      busy = true;
+      try {
+        const r = await fetch("/api/calendar/sync", { method: "POST" });
+        const b = await r.json().catch(() => ({}));
+        if (b.pulled > 0) window.dispatchEvent(new Event("hub-refresh"));
+      } catch {
+        // offline: next time
+      } finally {
+        busy = false;
+      }
+    };
+    const soon = (e) => {
+      const t = e?.detail?.table;
+      if (t && !["leads", "quotes", "invoices"].includes(t)) return;
+      clearTimeout(timer);
+      timer = setTimeout(sync, 5000);
+    };
+    fetch("/api/calendar/sync", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((b) => { enabled = !!b.configured; if (enabled) sync(); })
+      .catch(() => {});
+    const every = setInterval(sync, 120000);
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("hub-save", soon);
+    return () => {
+      off = true;
+      clearInterval(every);
+      clearTimeout(timer);
+      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("hub-save", soon);
+    };
+  }, []);
+  return null;
+}
+
+function GoogleSyncPanel() {
+  const [status, setStatus] = useState(null); // { configured, connected, name, error, serviceAccount }
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+  const load = (check) =>
+    fetch(`/api/calendar/sync${check ? "?check=1" : ""}`, { cache: "no-store" }).then((r) => r.json()).then(setStatus).catch(() => setStatus({ configured: false }));
+  useEffect(() => { load(true); }, []);
+  const syncNow = async () => {
+    setBusy(true);
+    setResult("");
+    try {
+      const r = await fetch("/api/calendar/sync", { method: "POST" });
+      const b = await r.json();
+      if (b.error) setResult(b.error);
+      else if (b.busy) setResult("A sync is already running — give it a moment.");
+      else {
+        const bits = [b.created && `${b.created} added`, b.updated && `${b.updated} updated`, b.removed && `${b.removed} removed`, b.pulled && `${b.pulled} changed from your phone`].filter(Boolean);
+        setResult(`Synced — ${bits.length ? bits.join(", ") : "everything was already up to date"}.${b.errors?.length ? ` Problems: ${b.errors.join("; ")}` : ""}`);
+        if (b.pulled > 0) window.dispatchEvent(new Event("hub-refresh"));
+      }
+    } catch {
+      setResult("Couldn't reach the hub just now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!status) return null;
+  return (
+    <div className="panel" style={{ marginTop: 14 }}>
+      <div className="panel-head"><CalendarDays size={16} /><span>Two-way sync (Google Calendar)</span></div>
+      {!status.configured ? (
+        <p className="calc-note" style={{ margin: 0 }}>
+          Not set up yet. With it on, a date you change in your iPhone Calendar changes in the hub too (and the other way round). It needs a one-off Google setup — the steps are in the README, or ask Claude to walk you through them.
+        </p>
+      ) : (
+        <>
+          <p className="calc-note" style={{ marginTop: 0 }}>
+            {status.connected === false ? <span style={{ color: "var(--bad)" }}>Set up, but can't connect: {status.error}</span> : status.connected ? <>Connected to the calendar “{status.name}”. Move a job, visit or due date on your iPhone and the hub follows within a couple of minutes (while it's open); move it in the hub and the calendar follows.</> : "Checking…"}
+          </p>
+          <div className="calc-trigger-row">
+            <button className="btn-primary small" onClick={syncNow} disabled={busy}>{busy ? "Syncing…" : "Sync now"}</button>
+          </div>
+          {result && <p className="calc-note" style={{ marginBottom: 0 }}>{result}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function CalendarModal({ onClose }) {
   const [links, setLinks] = useState(null);
   const [error, setError] = useState("");
@@ -2405,6 +2502,7 @@ function CalendarModal({ onClose }) {
           </p>
         </>
       )}
+      <GoogleSyncPanel />
     </Modal>
   );
 }
@@ -3316,6 +3414,7 @@ export default function HubApp() {
           )}
         </Modal>
       )}
+      <GoogleSyncRunner />
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />}
     </div>
