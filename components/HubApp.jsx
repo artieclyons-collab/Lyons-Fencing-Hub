@@ -18,7 +18,7 @@ import {
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, templateMaterialsCost, estFuelCost,
+  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, colorbondBays, templateMaterialsCost, estFuelCost,
   isDepositInvoice, DEPOSIT_DUE_NOTE,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
@@ -958,12 +958,13 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
   );
 }
 
-function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
+function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults }) {
   const [form, setForm] = useState({
-    style: prefill?.style || "timber",
+    style: prefill?.style || quoteDefaults?.style || "timber",
     timberStyle: prefill?.timberStyle || "butted",
-    length: prefill?.length_m ?? "",
-    height: prefill?.height_m ?? "1.8",
+    length: prefill?.length_m ?? quoteDefaults?.length ?? "",
+    height: prefill?.height_m ?? quoteDefaults?.height ?? "1.8",
+    raked: !!quoteDefaults?.raked,
     gates: prefill?.gates ?? "0",
     gateWidth: "1",
     postSpacing: "",
@@ -990,6 +991,12 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
         </Field>
         <Field label="Length (m)"><input type="number" value={form.length} onChange={(e) => set("length", e.target.value)} placeholder="e.g. 24" /></Field>
       </div>
+      {form.style === "colorbond" && (
+        <label className="check-row">
+          <input type="checkbox" checked={!!form.raked} onChange={(e) => set("raked", e.target.checked)} />
+          <span>Raked (sheets cut down to follow a slope) — a 1.8m fence then uses the 2100mm sheets</span>
+        </label>
+      )}
       {form.style === "timber" && (
         <Field label="Timber style">
           <select value={form.timberStyle} onChange={(e) => set("timberStyle", e.target.value)}>
@@ -1011,6 +1018,15 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
         <Field label="Bay width (m)"><input type="number" step="0.01" value={form.panelWidth} onChange={(e) => set("panelWidth", e.target.value)} placeholder={form.style === "colorbond" ? "2.365" : "2.4"} /></Field>
         <Field label="Post spacing (m)"><input type="number" step="0.01" value={form.postSpacing} onChange={(e) => set("postSpacing", e.target.value)} placeholder="same as bay width" /></Field>
       </div>
+      {form.style === "colorbond" && Number(form.length) > 0 && !Number(form.panelWidth) && !Number(form.postSpacing) && (() => {
+        const m = colorbondBays(form.length);
+        return (
+          <p className="calc-note" style={{ color: "var(--good)" }}>
+            <Check size={12} style={{ verticalAlign: "-2px" }} /> Plan for {form.length}m: {m.std} × 2365mm bay{m.std === 1 ? "" : "s"}
+            {m.long > 0 ? ` + 1 × 3125mm bay (4 sheets) at the end` : ""} — covers {m.covers.toFixed(2)}m. Type a bay width below to override.
+          </p>
+        );
+      })()}
       <p className="calc-note">Costs are pulled from your Materials list where the name matches — anything showing $0.00 either isn't priced yet or the name didn't match closely enough (adjust it in Materials).</p>
 
       {preview.length > 0 && (
@@ -1720,6 +1736,12 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         <MaterialCalcModal
           materials={materials}
           prefill={scanPrefill}
+          quoteDefaults={{
+            style: form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
+            length: form.jobLength || undefined,
+            height: form.fenceHeight || undefined,
+            raked: (form.items || []).some((it) => /raked/i.test(it.tpl || "")),
+          }}
           onClose={() => { setShowCalc(false); setScanPrefill(null); }}
           onApply={(total, items) => {
             // When fence templates already cost the materials, the calculator only feeds the shopping list.

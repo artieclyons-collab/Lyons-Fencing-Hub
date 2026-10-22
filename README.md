@@ -135,3 +135,7 @@ The address always comes from the email saved on that quote/invoice (copied from
 1. Run `supabase/migration-8-email.sql` in the Supabase SQL Editor (adds `clientEmail` and `lastEmailed` to quotes and invoices).
 2. On the business Google account (Lyonsfencingservices@gmail.com): turn on **2-Step Verification** (Google Account → Security), then **Security → App passwords** → create one (name it "Lyons Fencing Hub"). Google shows a 16-character password.
 3. Vercel → Settings → Environment Variables: `GMAIL_USER` = `Lyonsfencingservices@gmail.com` and `GMAIL_APP_PASSWORD` = the 16 characters. Redeploy.
+
+## Materials calculator — Colorbond bays and rakes
+
+Colorbond runs are split into standard bays (2365mm rail, 3 sheets) plus, where it fits the length better, one long bay at the end (3125mm rail, 4 sheets): e.g. 24m = 9 standard + 1 long (31 sheets) rather than 11 standard (33 sheets). Each bay has 2 rails, 2 posts and 2 bags of concrete. Typing a bay width overrides this. Tick **Raked** (set automatically when the quote has a raked line) and a 1.8m fence lists the 2.1H sheets (cut down to follow the slope). Code: `colorbondBays` / `calcMaterials` in `lib/logic.js`.
