@@ -18,10 +18,11 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
   const [text, setText] = useState("");
   const [message, setMessage] = useState("");
   const [result, setResult] = useState(null);
+  const [extra, setExtra] = useState([]); // other documents for the same client going in the same email
 
   useEffect(() => {
     let off = false;
-    api({ kind, id, preview: true }).then((r) => {
+    api({ kind, id, ids: extra, preview: true }).then((r) => {
       if (off) return;
       if (!r.ok) { setMessage(r.json.error || "Couldn't prepare that email."); setState("error"); return; }
       setInfo(r.json);
@@ -30,13 +31,13 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
       setState("ready");
     }).catch(() => { if (!off) { setMessage("Couldn't reach the hub."); setState("error"); } });
     return () => { off = true; };
-  }, [kind, id]);
+  }, [kind, id, extra.join(",")]);
 
   const send = async () => {
     setState("sending");
     setMessage("");
     try {
-      const r = await api({ kind, id, subject, body: text });
+      const r = await api({ kind, id, ids: extra, subject, body: text });
       if (!r.ok) { setMessage(r.json.error || "Couldn't send that."); setState("ready"); return; }
       setResult(r.json);
       setState("sent");
@@ -71,8 +72,19 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
               <div className="email-meta">
                 <div><span>From</span><strong>{info.from || "—"}</strong></div>
                 <div><span>To</span><strong>{info.to || "—"}</strong></div>
-                {info.attachment && <div><span>Attached</span><strong><Paperclip size={12} style={{ verticalAlign: "-1px" }} /> {info.attachment}</strong></div>}
+                {info.attachments?.length > 0 && <div><span>Attached</span><strong>{info.attachments.map((a) => <span key={a} style={{ display: "block", color: "inherit", minWidth: 0 }}><Paperclip size={12} style={{ verticalAlign: "-1px" }} /> {a}</span>)}</strong></div>}
               </div>
+              {info.others?.length > 0 && (
+                <div className="email-others">
+                  <span className="calc-note" style={{ margin: 0 }}>Also include {info.name ? `${info.name}'s` : "this client's"} other {kind === "quote" ? "quotes" : "invoices"} in the same email:</span>
+                  {info.others.map((o) => (
+                    <label key={o.id} className="check-row">
+                      <input type="checkbox" checked={extra.includes(o.id)} onChange={(e) => setExtra((x) => (e.target.checked ? [...x, o.id] : x.filter((y) => y !== o.id)))} />
+                      <span>{o.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
               <label className="field">
                 <span>Subject</span>
                 <input value={subject} onChange={(e) => setSubject(e.target.value)} />
@@ -87,7 +99,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
                   <Send size={15} /> {state === "sending" ? "Sending…" : `Send to ${info.to || "…"}`}
                 </button>
               </div>
-              <p className="calc-note" style={{ marginBottom: 0 }}>Nothing is sent until you tap Send. It's sent from your business Gmail, so replies land in that inbox.</p>
+              <p className="calc-note" style={{ marginBottom: 0 }}>Nothing is sent until you tap Send. Your sign-off, signature and logo are added automatically. It's sent from your business Gmail, so replies land in that inbox.</p>
             </>
           )}
 

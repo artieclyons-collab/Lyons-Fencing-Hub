@@ -1,15 +1,17 @@
 // Email a quote or invoice (or a follow-up / start-date / payment reminder) to the client, from the business Gmail account.
 //   GET  -> is sending set up?
-//   POST { kind, id, preview?, subject?, body? }
-//        preview: true  -> returns who it would go to and the wording (nothing is sent)
-//        otherwise      -> sends it, attaches the PDF where it makes sense, and records that it was sent.
-// The hub has no login, so this is deliberately narrow: the recipient is ALWAYS the email saved on that quote/invoice (or on
+//   POST { kind, id, ids?, preview?, subject?, body? }
+//        ids:           other quotes/invoices for the SAME client to send in the same email (the wording goes plural)
+//        preview: true  -> returns who it would go to, the wording, and the client's other documents (nothing is sent)
+//        otherwise      -> sends it, attaches the PDFs where it makes sense, and records that it was sent.
+// The hub has no login, so this is deliberately narrow: the recipient is ALWAYS the email saved on the quote/invoice (or on
 // the matching lead) and never comes from the request, only the app's own pages may call it, the same document can't be sent
 // twice within two minutes, and there is a daily limit.
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { renderPdf } from "@/lib/pdf";
-import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, getMailer, composeEmail, sendEmail, isEmail } from "@/lib/email";
+import { buildFilename, money, itemsTotal, gstBreakdown } from "@/lib/logic";
+import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, sendEmail, isEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,37 +70,52 @@ async function handle(req) {
   const spec = KINDS[body.kind];
   if (!spec || !body.id) return NextResponse.json({ error: "Unknown kind or missing id" }, { status: 400 });
 
-  const { data: rec, error } = await supabaseAdmin.from(spec.table).select("*").eq("id", body.id).maybeSingle();
+  const ids = [...new Set([body.id, ...(Array.isArray(body.ids) ? body.ids : [])].map(String))].slice(0, MAX_DOCS);
+  const { data: found, error } = await supabaseAdmin.from(spec.table).select("*").in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!rec) return NextResponse.json({ error: "Couldn't find that document" }, { status: 404 });
-  if (!("lastEmailed" in rec)) {
+  const recs = ids.map((i) => (found || []).find((r) => r.id === i)).filter(Boolean);
+  if (recs.length !== ids.length) return NextResponse.json({ error: "Couldn't find that document" }, { status: 404 });
+  if (!("lastEmailed" in recs[0])) {
     return NextResponse.json({ error: "Emailing needs one small database update first (migration 8 in the supabase folder).", needsMigration: true }, { status: 501 });
   }
+  const client = norm(recs[0].clientName);
+  if (recs.some((r) => norm(r.clientName) !== client)) return NextResponse.json({ error: "Those belong to different clients, so they can't go in one email." }, { status: 400 });
 
-  // Who it goes to: the email saved on the document, else the matching lead's.
-  let to = String(rec.clientEmail || "").trim();
-  if (!isEmail(to)) {
-    const { data: leads } = await supabaseAdmin.from("leads").select("name,phone,email");
-    const quoteForPhone = spec.table === "invoices" && rec.quoteId ? (await supabaseAdmin.from("quotes").select("clientPhone,clientEmail").eq("id", rec.quoteId).maybeSingle()).data : null;
-    const phone = tail(rec.clientPhone || quoteForPhone?.clientPhone);
+  // Who it goes to: the email saved on the document, else on its quote, else the matching lead's.
+  const { data: leads } = await supabaseAdmin.from("leads").select("name,phone,email");
+  const emailFor = async (rec) => {
+    if (isEmail(rec.clientEmail)) return rec.clientEmail.trim();
+    const quote = spec.table === "invoices" && rec.quoteId ? (await supabaseAdmin.from("quotes").select("clientPhone,clientEmail").eq("id", rec.quoteId).maybeSingle()).data : null;
+    if (quote && isEmail(quote.clientEmail)) return quote.clientEmail.trim();
+    const phone = tail(rec.clientPhone || quote?.clientPhone);
     const lead = (leads || []).find((l) => isEmail(l.email) && ((phone.length >= 8 && tail(l.phone) === phone) || norm(l.name) === norm(rec.clientName)));
-    to = quoteForPhone && isEmail(quoteForPhone.clientEmail) ? quoteForPhone.clientEmail.trim() : lead?.email?.trim() || "";
-  }
+    return lead?.email?.trim() || "";
+  };
+  const addresses = [...new Set((await Promise.all(recs.map(emailFor))).filter(Boolean))];
+  if (addresses.length > 1) return NextResponse.json({ error: "Those have different email addresses saved, so they can't go in one email." }, { status: 400 });
+  const to = addresses[0] || "";
 
-  const origin = req.headers.get("origin") || `https://${req.headers.get("host")}`;
-  const composed = composeEmail(body.kind, rec, { origin });
+  const composed = composeEmail(body.kind, recs);
   const subject = String(body.subject ?? composed.subject).slice(0, 200).replace(/[\r\n]+/g, " ").trim() || composed.subject;
   const text = String(body.body ?? composed.text).slice(0, 4000);
   const mailer = getMailer();
-  const attachmentName = spec.pdf ? `${spec.label} ${rec.docNumber || ""}.pdf`.trim() : null;
+  const attachmentNames = spec.pdf ? recs.map((r) => `${buildFilename(spec.pdf, r)}.pdf`) : [];
 
   if (body.preview) {
-    return NextResponse.json({ ok: true, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachment: attachmentName, name: rec.clientName || "" }, NO_STORE);
+    // The same client's other documents that could go in the same email.
+    const { data: all } = await supabaseAdmin.from(spec.table).select("*");
+    const eligible = (r) => (spec.table === "quotes" ? ["Draft", "Sent"].includes(r.status) : r.status !== "Paid");
+    const others = spec.pdf
+      ? (all || [])
+          .filter((r) => !ids.includes(r.id) && norm(r.clientName) === client && eligible(r))
+          .map((r) => ({ id: r.id, label: [r.docNumber, r.jobType, money(gstBreakdown(itemsTotal(r.items)).total)].filter(Boolean).join(" · ") }))
+      : [];
+    return NextResponse.json({ ok: true, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachments: attachmentNames, others, ids, name: recs[0].clientName || "" }, NO_STORE);
   }
 
   if (!mailer) return NextResponse.json({ error: "Email isn't set up yet — add GMAIL_USER and GMAIL_APP_PASSWORD." }, { status: 501 });
   if (!isEmail(to)) return NextResponse.json({ error: "There's no email address saved for this client. Add one and try again.", needsEmail: true }, { status: 422 });
-  if (rec.lastEmailed && Date.now() - Date.parse(rec.lastEmailed) < COOLDOWN_SECONDS * 1000) {
+  if (recs.some((r) => r.lastEmailed && Date.now() - Date.parse(r.lastEmailed) < COOLDOWN_SECONDS * 1000)) {
     return NextResponse.json({ error: "That was only just sent — wait a couple of minutes before sending it again." }, { status: 429 });
   }
   const since = startOfTodayBrisbane();
@@ -110,8 +127,10 @@ async function handle(req) {
   const attachments = [];
   try {
     if (spec.pdf) {
-      const { pdf, filename } = await renderPdf(spec.pdf, rec);
-      attachments.push({ filename, content: pdf, contentType: "application/pdf" });
+      for (const r of recs) {
+        const { pdf, filename } = await renderPdf(spec.pdf, r);
+        attachments.push({ filename, content: pdf, contentType: "application/pdf" });
+      }
     }
     await sendEmail({ mailer, to, subject, text, attachments });
   } catch (e) {
@@ -120,17 +139,19 @@ async function handle(req) {
   }
 
   // Record it, so it isn't offered again and the quote moves on.
-  const patch = { lastEmailed: new Date().toISOString() };
   const marked = [];
-  if (!isEmail(rec.clientEmail)) patch.clientEmail = to; // remember the address that worked
-  if (body.kind === "quote" && rec.status === "Draft") { patch.status = "Sent"; marked.push("Marked the quote as Sent."); }
-  if (body.kind === "followup") patch.lastFollowUp = todayBrisbane();
-  if (body.kind === "start") patch.lastFollowUp = `start:${rec.startDate}`;
-  if (body.kind === "chase") patch.lastChase = todayBrisbane();
-  try {
-    await safeUpdate(spec.table, rec.id, patch);
-  } catch (e) {
-    console.error("email sent but couldn't record it", e.message);
+  for (const rec of recs) {
+    const patch = { lastEmailed: new Date().toISOString() };
+    if (!isEmail(rec.clientEmail)) patch.clientEmail = to; // remember the address that worked
+    if (body.kind === "quote" && rec.status === "Draft") { patch.status = "Sent"; marked.push(`${rec.docNumber || "Quote"} marked as Sent.`); }
+    if (body.kind === "followup") patch.lastFollowUp = todayBrisbane();
+    if (body.kind === "start") patch.lastFollowUp = `start:${rec.startDate}`;
+    if (body.kind === "chase") patch.lastChase = todayBrisbane();
+    try {
+      await safeUpdate(spec.table, rec.id, patch);
+    } catch (e) {
+      console.error("email sent but couldn't record it", e.message);
+    }
   }
   return NextResponse.json({ ok: true, to, marked, attached: attachments.map((a) => a.filename), test: !!mailer.test }, NO_STORE);
 }

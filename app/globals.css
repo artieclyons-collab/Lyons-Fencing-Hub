@@ -498,3 +498,4 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .email-meta div{ display:flex; gap:10px; flex-wrap:wrap; }
 .email-meta span{ color:var(--text-dim); min-width:64px; }
 .email-meta strong{ font-weight:600; word-break:break-all; }
+.email-others{ display:flex; flex-direction:column; gap:4px; margin-bottom:12px; padding:10px 12px; border:1px dashed var(--line); border-radius:8px; }
