@@ -107,8 +107,8 @@ async function handle(req) {
     return NextResponse.json({ error: `That's the daily limit of ${DAILY_CAP} emails. It resets tomorrow.` }, { status: 429 });
   }
 
+  const attachments = [];
   try {
-    const attachments = [];
     if (spec.pdf) {
       const { pdf, filename } = await renderPdf(spec.pdf, rec);
       attachments.push({ filename, content: pdf, contentType: "application/pdf" });
