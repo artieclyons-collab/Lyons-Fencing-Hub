@@ -108,3 +108,7 @@ A calendar *subscription* (the older iPhone link above) is read-only. For change
 5. Vercel → project → **Settings → Environment Variables**: `GOOGLE_SERVICE_ACCOUNT_JSON` = the whole contents of the JSON file, and `GOOGLE_CALENDAR_ID` = the Calendar ID. Redeploy.
 6. iPhone: **Settings → Calendar → Accounts → Add Account → Google**, sign in, and make sure *Calendar* is on. In the Calendar app tick **Lyons Fencing Hub** under *Calendars* (if it isn't listed, tick it at calendar.google.com/calendar/u/0/syncselect).
 7. Remove the older subscribed "Lyons Fencing Hub" calendar from the iPhone (Settings → Calendar → Accounts → Subscribed Calendars), or every entry shows twice.
+
+## Site notes → draft quote
+
+Write the notes from a site visit in the lead's **Notes** box, one job per line, in plain shorthand — e.g. `26m 1.8 colorbond raked`, `remove old fence`, `1 gate`, `20m 2.1 timber lapped and capped`, `3 posts`, `vegetation`, `excavator`. The lead form shows a live "Quote preview"; **Start quote** (on the lead, in the Visit planner, or the Today list) then opens a quote with those lines filled in at your usual template rates, the job length/height set, the standard notes added, and the client's details copied across. A "Drafted from your site notes" box lists what it assumed (e.g. butted paling if you didn't say lapped) and anything that needs a price (retaining walls have no template). Anything it doesn't recognise is ignored, so ordinary notes can sit alongside. Code: `lib/siteNotes.js`.

@@ -471,3 +471,16 @@ html, body{ margin:0; padding:0; background:var(--bg); }
 .ds-time.dim{ color:var(--text-dim); font-size:12px; font-weight:500; }
 .ds-sub, .ds-addr{ font-size:13px; color:var(--text-dim); margin-top:2px; }
 .ds-notes{ font-size:12px; color:var(--text-dim); margin-top:4px; white-space:pre-wrap; }
+
+/* iPhone full-screen app: keep everything clear of the clock/Dynamic Island at the top and the home bar at the bottom. */
+.topbar{ padding-top:calc(20px + env(safe-area-inset-top, 0px)); }
+body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(safe-area-inset-top, 0px); background:var(--bg); z-index:40; pointer-events:none; }
+.tabbar{ top:env(safe-area-inset-top, 0px); }
+.app{ padding-bottom:env(safe-area-inset-bottom, 0px); }
+.modal-overlay{ padding-top:env(safe-area-inset-top, 0px); padding-bottom:env(safe-area-inset-bottom, 0px); }
+.save-error-banner{ padding-top:calc(10px + env(safe-area-inset-top, 0px)); }
+
+/* Drafted-from-notes box on the quote form */
+.draft-note{ border-color:var(--hivis); }
+.draft-assume{ margin:4px 0 0; padding-left:18px; font-size:12px; color:var(--text-dim); }
+.draft-assume li{ margin:2px 0; }

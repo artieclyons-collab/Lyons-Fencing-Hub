@@ -36,7 +36,8 @@ import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
-import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint } from "@/lib/availability";
+import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, ownNotes } from "@/lib/availability";
+import { parseSiteNotes } from "@/lib/siteNotes";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -883,7 +884,13 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
         <Field label="Visit time (optional)"><input type="time" value={form.visitTime || ""} onChange={(e) => set("visitTime", e.target.value)} /></Field>
       </div>
       <p className="calc-note" style={{ marginTop: -6 }}>A site visit goes straight into your iPhone calendar with reminders (see the calendar button at the top).</p>
-      <Field label="Notes"><textarea rows={3} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Site details, measurements, timing... (e.g. “Available from 3:30pm onwards.” is picked up by the visit planner)" /></Field>
+      <Field label="Notes (site notes become the quote)">
+        <textarea rows={4} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder={"One job per line, e.g.\n26m 1.8 colorbond raked\nremove old fence\n1 gate\n(“Available from 3:30pm onwards.” is picked up by the visit planner)"} />
+        {(() => {
+          const d = parseSiteNotes(ownNotes(form.notes), { jobType: form.jobType });
+          return d.items.length > 0 ? <span className="calc-note" style={{ display: "block", marginTop: 6 }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Quote preview: {d.summary.join(" · ")} — tap Start quote to draft it.</span> : null;
+        })()}
+      </Field>
       <div className="calc-trigger-row" style={{ marginTop: -4 }}>
         <button type="button" className="btn-ghost small" onClick={() => setShowText(true)}><ClipboardPaste size={14} /> Paste a text from them</button>
       </div>
@@ -1060,7 +1067,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
       // Name, phone, address (split into street and suburb), and job type all come across from the lead.
       setModal({
         mode: "new",
-        data: { ...quoteFromLead(pendingNewFrom), docNumber: previewNumber(), items: [] },
+        data: { ...quoteFromLead(pendingNewFrom), docNumber: previewNumber() },
       });
       clearPending();
     }
@@ -1068,7 +1075,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
   }, [pendingNewFrom]);
 
   const save = (data) => {
-    const { _fromLeadId, ...row } = data;
+    const { _fromLeadId, _draft, ...row } = data;
     if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
     else {
       bumpDocNumber();
@@ -1588,6 +1595,20 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           </p>
         )}
       </div>
+
+      {form._draft && (
+        <div className="panel draft-note">
+          <div className="panel-head"><ClipboardPaste size={16} /><span>Drafted from your site notes</span></div>
+          <p style={{ margin: "0 0 6px" }}>{form._draft.summary.join(" · ")}</p>
+          {form._draft.needsPrice.map((t) => <p key={t} className="calc-note" style={{ color: "var(--bad)", margin: "2px 0" }}>{t}</p>)}
+          {form._draft.assumptions.length > 0 && (
+            <ul className="draft-assume">
+              {form._draft.assumptions.map((t) => <li key={t}>{t}</li>)}
+            </ul>
+          )}
+          <p className="calc-note" style={{ margin: "6px 0 0" }}>These are a starting point from your notes, using your usual rates. Check the lines and the standard notes below, then save.</p>
+        </div>
+      )}
 
       <Field label="Line items">
         <p className="calc-note">This is what the client sees and pays — "Insert job template" below uses your job length and fence height automatically.</p>
