@@ -32,6 +32,7 @@ import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import DaySheet from "./DaySheet";
+import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
@@ -824,6 +825,9 @@ function Leads({ leads, setLeads, go }) {
                   {l.visitDate ? ` · Site visit ${formatDateAU(l.visitDate)}${l.visitTime ? ` ${l.visitTime}` : ""}` : ""}
                 </div>
               </div>
+              {["New", "Contacted"].includes(l.status) && (
+                <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); go("quotes", { newFromLead: l }); }} title="Start a quote with their details filled in"><FileText size={13} /> Start quote</button>
+              )}
               <Tag label={l.status} />
             </div>
           ))}
@@ -1013,7 +1017,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
 }
 
 // ---------- Quotes ----------
-function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber, go }) {
+function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber, go }) {
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
@@ -1034,9 +1038,10 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
 
   useEffect(() => {
     if (pendingNewFrom) {
+      // Name, phone, address (split into street and suburb), and job type all come across from the lead.
       setModal({
         mode: "new",
-        data: { clientName: pendingNewFrom.name, address: pendingNewFrom.address, jobType: pendingNewFrom.jobType, docNumber: previewNumber(), items: [] },
+        data: { ...quoteFromLead(pendingNewFrom), docNumber: previewNumber(), items: [] },
       });
       clearPending();
     }
@@ -1044,10 +1049,13 @@ function Quotes({ quotes, setQuotes, invoices, setInvoices, pendingNewFrom, clea
   }, [pendingNewFrom]);
 
   const save = (data) => {
-    if (data.id) setQuotes((qs) => qs.map((q) => (q.id === data.id ? data : q)));
+    const { _fromLeadId, ...row } = data;
+    if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
     else {
       bumpDocNumber();
-      setQuotes((qs) => [{ ...data, id: uid(), date: data.date || today() }, ...qs]);
+      setQuotes((qs) => [{ ...row, id: uid(), date: row.date || today() }, ...qs]);
+      // A quote started from a lead means the site visit is done: the lead moves to Quoted (and leaves the Visit planner).
+      if (_fromLeadId) setLeads((ls) => ls.map((l) => (l.id === _fromLeadId && ["New", "Contacted"].includes(l.status) ? { ...l, status: "Quoted" } : l)));
     }
     setModal(null);
   };
@@ -2561,7 +2569,7 @@ function TextImportModal({ lead, onApply, onClose }) {
   );
 }
 
-function VisitPlanner({ leads, quotes, setLeads }) {
+function VisitPlanner({ leads, quotes, setLeads, go }) {
   const t = today();
   const { confirmed, flexible, left } = useMemo(() => collectVisits(leads, quotes, t), [leads, quotes, t]);
   const allStops = useMemo(() => [...confirmed, ...flexible], [confirmed, flexible]);
@@ -2811,6 +2819,7 @@ function VisitPlanner({ leads, quotes, setLeads }) {
           )
         )}
         <button className="btn-ghost small" onClick={() => setTextFor(s)}><ClipboardPaste size={13} /> Paste a text</button>
+        <button className="btn-ghost small" onClick={() => go("quotes", { newFromLead: leads.find((l) => l.id === s.leadId) || { id: s.leadId, name: s.name, phone: s.phone, address: s.address, jobType: s.jobType } })} title="Start a quote with their details filled in"><FileText size={13} /> Start quote</button>
         <button className="btn-ghost small" onClick={() => setEditLead(leads.find((l) => l.id === s.leadId) || null)}>Edit lead</button>
         {askRemove === s.id ? (
           <span className="vp-confirm">
@@ -3249,9 +3258,9 @@ export default function HubApp() {
           <>
             {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
             {tab === "leads" && <Leads leads={leads} setLeads={setLeads} go={go} />}
-            {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} />}
+            {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
+            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}

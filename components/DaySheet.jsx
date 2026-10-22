@@ -3,7 +3,7 @@
 // who to call) and each quote visit in time order — with directions and a copy-as-text button.
 // It reads the same schedule the Board calendar and iPhone feed use, so it can't disagree with them.
 import { useState, useEffect } from "react";
-import { Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning, Hammer, Users, Navigation, Phone, Copy, Check, Route } from "lucide-react";
+import { Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning, Hammer, Users, Navigation, Phone, Copy, Check, Route, FileText } from "lucide-react";
 import { addDaysIso } from "@/lib/schedule";
 import { hoursLabel } from "@/lib/jobSchedule";
 import { rainLevel, weatherIcon, RAIN_LABEL } from "@/lib/weather";
@@ -109,6 +109,7 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
             <div className="vp-actions">
               {(l.address || e.location) && <a className="btn-ghost small" href={mapsTo(l.address || e.location)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>}
               {l.phone && <a className="btn-ghost small" href={`tel:${l.phone}`}><Phone size={13} /> Call</a>}
+              {l.id && ["New", "Contacted"].includes(l.status) && <button className="btn-ghost small" onClick={() => go("quotes", { newFromLead: l })}><FileText size={13} /> Start quote</button>}
             </div>
           </div>
         </div>

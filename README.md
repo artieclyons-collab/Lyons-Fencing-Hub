@@ -87,3 +87,7 @@ The Board's **Texts to send** panel lists quote follow-ups (3 days after a quote
 ## Today / Tomorrow (Board)
 
 A panel near the top of the Board shows one day at a time (Today before 3pm, Tomorrow after, with a switch): the weather, each job (address, how long, call, directions) and each quote visit in time order. It reads the same schedule as the calendar and the iPhone feed. **Copy as text** gives a plain summary to paste somewhere. Code: `components/DaySheet.jsx`.
+
+## Lead → quote
+
+**Start quote** (on a lead, in the Visit planner, and on the Today/Tomorrow list) opens a new quote with the lead's name, phone, address (split into street and suburb, with QLD/NSW added) and job type filled in. Saving that quote moves the lead to **Quoted**, which also takes them out of the Visit planner. Code: `lib/leadToQuote.js`.
