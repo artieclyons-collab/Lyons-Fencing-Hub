@@ -455,3 +455,19 @@ html, body{ margin:0; padding:0; background:var(--bg); }
 .text-actions, .text-confirm{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; }
 .text-confirm{ font-size:13px; }
 .btn-primary.chase{ background:var(--bad); color:#fff; }
+
+/* Today / Tomorrow day sheet (Board) */
+.ds-date{ font-size:13px; color:var(--text-dim); margin:2px 0 10px; }
+.ds-weather{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:8px 10px; border-radius:8px; background:var(--surface2); border:1px solid var(--line); font-size:13px; margin-bottom:10px; }
+.ds-weather.wet, .ds-weather.heavy{ border-color:var(--bad); color:var(--bad); }
+.ds-item{ display:flex; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+.ds-item:first-of-type{ border-top:none; }
+.ds-icon{ flex:none; width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; background:var(--surface2); border:1px solid var(--line); color:var(--hivis); }
+.ds-item.visit .ds-icon{ color:var(--timber); }
+.ds-main{ flex:1; min-width:0; }
+.ds-title{ font-weight:600; display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
+.ds-title span:not(.ds-time){ font-size:12px; font-weight:500; color:var(--text-dim); }
+.ds-time{ color:var(--hivis); }
+.ds-time.dim{ color:var(--text-dim); font-size:12px; font-weight:500; }
+.ds-sub, .ds-addr{ font-size:13px; color:var(--text-dim); margin-top:2px; }
+.ds-notes{ font-size:12px; color:var(--text-dim); margin-top:4px; white-space:pre-wrap; }

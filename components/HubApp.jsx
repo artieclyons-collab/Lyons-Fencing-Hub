@@ -31,6 +31,7 @@ import {
 import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
+import DaySheet from "./DaySheet";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
@@ -654,6 +655,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           </button>
         ))}
       </div>
+
+      <DaySheet events={allEvents} quotes={quotes} leads={leads} forecast={forecast} go={go} />
 
       <WeatherPanel forecast={forecast} error={forecastError} jobsByDate={jobsByDate} onPushBack={() => setPushOpen(true)} />
 

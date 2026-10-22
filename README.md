@@ -83,3 +83,7 @@ Open the deployed URL in Safari (iPhone) → Share → **Add to Home Screen**. T
 ## Texts to send (Board)
 
 The Board's **Texts to send** panel lists quote follow-ups (3 days after a quote is Sent, again every 7 days up to a month) and invoice chasers (7 days after an invoice is issued, again every 7 days until it's Paid). Each has a button that opens a ready-written text in Messages from your own number — a web page can't send it for you — then asks "Did you send it?" and only then hides it until it's due again. The wording can be edited (**Edit wording**, saved on that device). Run `supabase/migration-7-text-reminders.sql` once so "sent" is remembered; until then the texts work but keep showing.
+
+## Today / Tomorrow (Board)
+
+A panel near the top of the Board shows one day at a time (Today before 3pm, Tomorrow after, with a switch): the weather, each job (address, how long, call, directions) and each quote visit in time order. It reads the same schedule as the calendar and the iPhone feed. **Copy as text** gives a plain summary to paste somewhere. Code: `components/DaySheet.jsx`.
