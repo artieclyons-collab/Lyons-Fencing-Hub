@@ -91,3 +91,7 @@ A panel near the top of the Board shows one day at a time (Today before 3pm, Tom
 ## Lead → quote
 
 **Start quote** (on a lead, in the Visit planner, and on the Today/Tomorrow list) opens a new quote with the lead's name, phone, address (split into street and suburb, with QLD/NSW added) and job type filled in. Saving that quote moves the lead to **Quoted**, which also takes them out of the Visit planner. Code: `lib/leadToQuote.js`.
+
+## Booking a job in (quote accepted)
+
+Setting a quote to **Accepted** (or a client accepting it online) drops it into the next free working days after your booked jobs — and now **skips days the forecast says are wet** (heavy 15mm+ or wet 5mm+; the forecast reaches about 2 weeks). The same applies in the "Schedule accepted jobs" dialog. The date is only a suggestion — change it on the quote or the Board calendar. Once a job has a start date within 14 days, **Texts to send** offers a one-tap "you're booked in for …" text, and a "your start date has changed to …" text if you later move it (what the client was last told is remembered on the quote as `start:<date>` in `lastFollowUp`).

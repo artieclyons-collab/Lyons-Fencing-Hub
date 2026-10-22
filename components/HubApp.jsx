@@ -28,7 +28,7 @@ import { scheduleEvents, addDaysIso } from "@/lib/schedule";
 import {
   estimateHours, hoursLabel, jobDays, suggestSchedule, dayLoads, worksSaturday, isWorkDay, isIsoDate, HOURS_PER_DAY, shiftWorkDays,
 } from "@/lib/jobSchedule";
-import { rainLevel, isWetDay, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
+import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import DaySheet from "./DaySheet";
@@ -439,10 +439,10 @@ function BoardCalendar({ events, onMove, go, weather = {} }) {
 
 // Review screen for accepted jobs that don't have a start date yet: shows where each would go (next free
 // working days, in the order they were accepted, around booked work) so you can tweak or skip before applying.
-function ScheduleModal({ quotes, todo, onApply, onClose }) {
+function ScheduleModal({ quotes, todo, blocked, onApply, onClose }) {
   const todoById = useMemo(() => Object.fromEntries(todo.map((q) => [q.id, q])), [todo]);
   const [rows, setRows] = useState(() =>
-    suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || todoById[q.id]), today()).map((p) => ({ id: p.quote.id, include: true, start: p.start }))
+    suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || todoById[q.id]), today(), { blocked }).map((p) => ({ id: p.quote.id, include: true, start: p.start }))
   );
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
@@ -456,7 +456,7 @@ function ScheduleModal({ quotes, todo, onApply, onClose }) {
     <Modal title="Schedule accepted jobs" onClose={onClose}>
       <p className="calc-note">
         These accepted jobs have no start date. Each is placed in the next free working days, in the order you accepted them, around work that's
-        already booked. Change any date, untick the ones you want to leave, then apply.
+        already booked, skipping days the forecast says are wet. Change any date, untick the ones you want to leave, then apply.
       </p>
       {preview.length === 0 && <p className="calc-note">Nothing to place.</p>}
       {preview.map((p) => {
@@ -527,18 +527,21 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 
   // Quotes a client accepts themselves online are dropped into the next free slot as soon as the Board opens
   // (older undated jobs are left for you to review, so nothing gets a date you didn't see).
+  // Washed-out days in the forecast are skipped when jobs are placed automatically.
+  const wet = useMemo(() => wetDates(forecast), [forecast]);
   useEffect(() => {
+    if (forecast === null && !forecastError) return; // placed once the forecast is in (or has failed), so wet days can be skipped
     const fresh = acceptedNoDate.filter((q) => q.acceptedAt && daysSince(q.acceptedAt) >= 0 && daysSince(q.acceptedAt) <= 14);
     if (fresh.length === 0) return;
     const ids = new Set(fresh.map((q) => q.id));
-    const placed = suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || ids.has(q.id)), today()).filter((p) => ids.has(p.quote.id));
+    const placed = suggestSchedule(quotes.filter((q) => isIsoDate(q.startDate) || ids.has(q.id)), today(), { blocked: wet }).filter((p) => ids.has(p.quote.id));
     if (placed.length === 0) return;
     setQuotes((rows) => rows.map((r) => {
       const p = placed.find((x) => x.quote.id === r.id);
       return p && !isIsoDate(r.startDate) ? { ...r, startDate: p.start } : r;
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quotes]);
+  }, [quotes, forecast, forecastError]);
   const staleQuotes = quotes.filter((q) => q.status === "Sent" && daysSince(q.date) > 30);
 
   // ----- schedule: next 2 weeks by day, plus the next few far-off jobs/visits -----
@@ -759,6 +762,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         <ScheduleModal
           quotes={quotes}
           todo={acceptedNoDate}
+          blocked={wet}
           onClose={() => setScheduleOpen(false)}
           onApply={(assignments) => {
             setQuotes((rows) => rows.map((r) => {
@@ -1017,7 +1021,22 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill }) {
 }
 
 // ---------- Quotes ----------
+// The wet days in the forecast (a Set of dates), or null until it has loaded — used to keep automatic job dates off washouts.
+function useWetDates() {
+  const [wet, setWet] = useState(null);
+  useEffect(() => {
+    let off = false;
+    fetch("/api/weather")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (!off && b?.days) setWet(wetDates(b.days)); })
+      .catch(() => {});
+    return () => { off = true; };
+  }, []);
+  return wet;
+}
+
 function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber, go }) {
+  const wetDays = useWetDates();
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
@@ -1250,6 +1269,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
         <QuoteModal
           key={modal.data?.id || `new-${modal.dupKey || 0}`}
           initial={modal.data}
+          wetDays={wetDays}
           settings={settings}
           materials={materials}
           onClose={() => setModal(null)}
@@ -1309,7 +1329,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [] }) {
+function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -1335,7 +1355,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       const me = { ...form, id: form.id || "__new__", status: "Accepted" };
       // Only work that's actually booked in counts; undated accepted jobs are still waiting for you to review them.
       const booked = allQuotes.filter((q) => q.id !== form.id && isIsoDate(q.startDate));
-      const p = suggestSchedule([...booked, me], today()).find((x) => x.quote.id === me.id);
+      const p = suggestSchedule([...booked, me], today(), { blocked: wetDays }).find((x) => x.quote.id === me.id);
       if (p) {
         setForm((f) => ({ ...f, status: next, startDate: p.start }));
         setAutoPlaced(true);
@@ -1498,7 +1518,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       )}
       {form.status === "Accepted" && autoPlaced && form.startDate && (
         <p className="calc-note" style={{ marginTop: -6 }}>
-          <Clock size={12} style={{ verticalAlign: "-2px" }} /> Placed automatically in the next free slot ({formatDateAU(form.startDate)}). Change the date if you want it somewhere else.
+          <Clock size={12} style={{ verticalAlign: "-2px" }} /> Placed automatically in the next free slot ({formatDateAU(form.startDate)}){wetDays && wetDays.size > 0 ? ", skipping wet days in the forecast" : ""}. Change the date if you want it somewhere else.
         </p>
       )}
       {form.status === "Accepted" && (
