@@ -487,3 +487,8 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 
 /* Scan receipt (expense form) */
 .receipt-scan{ display:flex; flex-direction:column; align-items:flex-start; gap:8px; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--line); }
+
+/* Visit planner suggestions */
+.vp-suggest{ border-color:var(--hivis); }
+.vp-sug{ padding:10px 0; border-top:1px solid var(--line); }
+.vp-sug:first-of-type{ border-top:none; }

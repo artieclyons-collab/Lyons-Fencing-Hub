@@ -1,13 +1,14 @@
 // Receives client texts forwarded from the iPhone (a Shortcuts automation posts each incoming message here).
-// If the sender's number (or, for a saved contact, exact name) matches a lead, the text is added to that lead's notes and any availability in it
-// ("free from 3:30") is picked up for the visit planner. Texts from anyone who isn't a lead are ignored and
-// NOT stored — your personal messages never end up in the hub.
+// If the sender's number (or, for a saved contact, exact name) matches a lead, only the useful part of the text is used:
+// an address updates the lead's address, availability ("free from 3:30") updates what the visit planner reads, and a
+// cancellation is flagged. The message itself isn't copied into the notes. Texts from anyone who isn't a lead are
+// ignored and NOT stored — your personal messages never end up in the hub.
 // Same shared secret as the phone-agent webhooks (x-api-key = PHONE_AGENT_API_KEY).
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { parseAvailability, parseNotesAvailability, withAvailability } from "@/lib/availability";
-import { detectEnquiry, localPhone } from "@/lib/enquiry";
+import { parseAvailability, parseNotesAvailability, withAvailability, detectCancellation } from "@/lib/availability";
+import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export async function POST(req) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,notes").order("inserted_at", { ascending: false });
+  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,address,notes").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // Names compare on letters and digits only, so emoji, spacing and punctuation ("Em ❤️" vs "Em") never get in the way.
   const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -85,19 +86,48 @@ export async function POST(req) {
   }
   if (!lead) return NextResponse.json({ ok: true, matched: false }); // not a lead: drop it, store nothing
 
+  // A text from a lead only changes what matters. The message itself is NOT copied into their notes:
+  //   - an address        -> the lead's address
+  //   - availability      -> the "Available from…" line the planner reads
+  //   - a cancellation, or a request to move the visit -> kept as a short record, so the planner can flag it
+  //   - anything else ("ok thanks", "see you then") -> ignored
   const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
   const existing = String(lead.notes || "");
-  if (existing.includes(clean)) return NextResponse.json({ ok: true, matched: true, duplicate: true, leadId: lead.id });
+  const patch = {};
+  const applied = [];
+  let notes = existing;
 
-  let notes = [existing.trim(), `Text ${stamp()}: ${clean}`].filter(Boolean).join("\n");
+  const addr = extractAddress(text);
+  if (addr) {
+    const cur = String(lead.address || "").trim();
+    if (norm(cur) !== norm(addr.full)) {
+      patch.address = addr.full;
+      applied.push("address");
+      // Replacing a full street address is worth a trace; filling in a bare suburb is not.
+      if (/\d/.test(cur)) notes = [notes.trim(), "Address changed by text (was: " + cur + ")."].filter(Boolean).join("\n");
+    }
+  }
+
   const found = parseAvailability(text);
   if (found.notBefore != null || found.notAfter != null) {
     const cur = parseNotesAvailability(existing);
-    notes = withAvailability(notes, { notBefore: found.notBefore ?? cur.notBefore, notAfter: found.notAfter ?? cur.notAfter });
+    const withNew = withAvailability(notes, { notBefore: found.notBefore ?? cur.notBefore, notAfter: found.notAfter ?? cur.notAfter });
+    if (withNew !== notes) {
+      notes = withNew;
+      applied.push("availability");
+    }
   }
-  notes = notes.slice(-4000); // keep the newest if a lead ever gets very chatty
 
-  const { error: upErr } = await supabaseAdmin.from("leads").update({ notes }).eq("id", lead.id);
+  const mood = detectCancellation(text);
+  if ((mood.cancelled || mood.reschedule) && !existing.includes(clean)) {
+    notes = [notes.trim(), "Text " + stamp() + ": " + clean].filter(Boolean).join("\n");
+    applied.push(mood.cancelled ? "possible cancellation" : "request to move the visit");
+  }
+
+  if (applied.length === 0) return NextResponse.json({ ok: true, matched: true, ignored: true, leadId: lead.id });
+
+  if (notes !== existing) patch.notes = notes.slice(-4000); // keep the newest if a lead ever gets very chatty
+  const { error: upErr } = await supabaseAdmin.from("leads").update(patch).eq("id", lead.id);
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
-  return NextResponse.json({ ok: true, matched: true, leadId: lead.id, availability: found });
+  return NextResponse.json({ ok: true, matched: true, leadId: lead.id, applied });
 }

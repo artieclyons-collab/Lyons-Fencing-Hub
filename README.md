@@ -116,3 +116,11 @@ Write the notes from a site visit in the lead's **Notes** box, one job per line,
 ## Scan a receipt → expense
 
 In **Finances → Log expense**, **Scan receipt** takes a photo (or picks one) of a fuel or tip receipt and fills in the amount (the GST-inclusive total), date, category (Fuel / Tipping/waste / Other) and a description like "Fuel — Ampol diesel 52.31L". The photo is read on the phone itself with Tesseract (free, nothing is uploaded; the reader downloads the first time it's used) and the result is only ever a suggestion — check it, then Save. Code: `lib/ocr.js` (reads the photo), `lib/receipt.js` (works out the expense).
+
+## Visit planner suggestions
+
+When a day is too full the planner now suggests concrete fixes ("Suggestions" panel): which visit to move and to which day (next ~10 days, no Sundays), why, and how much driving it adds. Visits with **no booked time** are suggested first; a visit that can't start until mid-afternoon is a natural one to move out of a packed day; a client with a booked time is only suggested when nothing else would help (at most one per day). The new day must fit their availability and not strain it, and a booked time doesn't carry over (the client has to be asked again). Buttons: **Move** (then **Save this day's times** to put the date on the lead and calendar), **Text {name}** (a ready-written "would {day} suit?" message from your own number) and **Not now**. Code: `suggestMoves` / `dayStrain` in `lib/visitPlanner.js`.
+
+## What a client's text changes (and doesn't)
+
+A text forwarded from the iPhone (or pasted with **Paste a text**) no longer gets copied into the lead's notes. Only the useful part is used: a street address replaces the lead's address (a changed street address leaves a one-line "Address changed by text (was: …)"), availability ("home by 3pm", "free from 3:30", "before 2") updates the "Available from…" line the planner reads, and a cancellation or a request to move the visit is kept as a short record so the planner and Board can flag it. Everything else ("ok thanks", "see you then") is ignored. "home/back/free by 3" means *from* 3; "done by 3" means *before* 3.

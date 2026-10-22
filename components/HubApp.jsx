@@ -39,6 +39,7 @@ import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visi
 import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, ownNotes } from "@/lib/availability";
 import { parseSiteNotes } from "@/lib/siteNotes";
 import { parseReceipt } from "@/lib/receipt";
+import { extractAddress } from "@/lib/enquiry";
 import { readReceipt } from "@/lib/ocr";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
@@ -2697,32 +2698,44 @@ function TextImportModal({ lead, onApply, onClose }) {
   const avail = parseAvailability(text);
   const day = parseDay(text, today());
   const hasAvail = avail.notBefore != null || avail.notAfter != null;
+  const addr = extractAddress(text);
+  const addrChanges = !!addr && String(lead.address || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "") !== addr.full.toLowerCase().replace(/[^a-z0-9]/g, "");
   const [useAvail, setUseAvail] = useState(true);
   const [useDay, setUseDay] = useState(true);
+  const [useAddr, setUseAddr] = useState(true);
+  const [keep, setKeep] = useState(false); // also keep the message itself in the notes (off by default: only the useful part is saved)
   const when = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  const nothingPicked = !hasAvail && !day && !addrChanges;
 
   const apply = () => {
     const clean = text.trim().replace(/\s*\n\s*/g, " ").slice(0, 600);
-    let notes = [String(lead.notes || "").trim(), clean ? `Text ${when}: ${clean}` : ""].filter(Boolean).join("\n");
+    let notes = [String(lead.notes || "").trim(), keep && clean ? `Text ${when}: ${clean}` : ""].filter(Boolean).join("\n");
     if (useAvail && hasAvail) {
       const cur = parseNotesAvailability(lead.notes);
       notes = withAvailability(notes, { notBefore: avail.notBefore ?? cur.notBefore, notAfter: avail.notAfter ?? cur.notAfter });
     }
     const patch = { notes };
     if (useDay && day) patch.visitDate = day;
+    if (useAddr && addrChanges) patch.address = addr.full;
     onApply(patch);
   };
 
   return (
     <Modal title={`Add a text${lead.name ? ` from ${firstName(lead.name) || lead.name}` : ""}`} onClose={onClose}>
-      <p className="calc-note">Copy the client's text on your phone and paste it here. It's saved in their notes, and anything about when they're free is picked out for the visit planner.</p>
+      <p className="calc-note">Copy the client's text on your phone and paste it here. I pick out what's useful — an address, when they're free, a day — and you choose what to apply. The message itself isn't saved unless you tick that.</p>
       <Field label="Their text">
         <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Friday after 3:30 works for me, I'm at 12 Smith St" autoFocus />
       </Field>
       {text.trim() && (
         <div className="panel" style={{ marginBottom: 12 }}>
           <div className="panel-head"><Check size={14} /><span>What I picked out</span></div>
-          {!hasAvail && !day && <p className="calc-note" style={{ margin: 0 }}>Nothing about times or days — it'll just be saved in the notes.</p>}
+          {nothingPicked && <p className="calc-note" style={{ margin: 0 }}>Nothing useful picked out (no address, time or day). Tick "keep the message" below if you want it in the notes.</p>}
+          {addrChanges && (
+            <label className="check-row">
+              <input type="checkbox" checked={useAddr} onChange={(e) => setUseAddr(e.target.checked)} />
+              <span>Set the address to {addr.full}</span>
+            </label>
+          )}
           {hasAvail && (
             <label className="check-row">
               <input type="checkbox" checked={useAvail} onChange={(e) => setUseAvail(e.target.checked)} />
@@ -2739,10 +2752,14 @@ function TextImportModal({ lead, onApply, onClose }) {
               <span>Set the visit day to {dayTitleLong(day)}</span>
             </label>
           )}
+          <label className="check-row">
+            <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+            <span>Also keep the message itself in their notes</span>
+          </label>
         </div>
       )}
       <div className="modal-actions">
-        <button className="btn-primary" disabled={!text.trim()} onClick={apply}><Check size={15} /> Save to {firstName(lead.name) || "the lead"}</button>
+        <button className="btn-primary" disabled={!text.trim() || (nothingPicked && !keep)} onClick={apply}><Check size={15} /> Save to {firstName(lead.name) || "the lead"}</button>
       </div>
     </Modal>
   );
@@ -2757,7 +2774,7 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
   const locStops = useMemo(() => [...allStops, { id: HOME.id, query: HOME.query }, ...jobs.map((j) => ({ id: j.id, query: j.query }))], [allStops, jobs]);
 
   // What you've chosen (kept on this device): which view, per-day start settings, locked times, visit lengths.
-  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, midday: {}, workStart: WORK_START, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
+  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, midday: {}, dismissed: {}, workStart: WORK_START, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
   useEffect(() => writeLS(PLAN_KEY, saved), [saved]);
   const patchSaved = (patch) => setSaved((s) => ({ ...s, ...patch }));
 
@@ -2824,6 +2841,9 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
     return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves, midday: saved.midday, jobs, workStart: saved.workStart, today: t });
   }, [matrix, nodeKey, confirmed, flexible, coords, index, jobs, t, saved.overrides, saved.locks, saved.durations, saved.moves, saved.midday, saved.workStart]);
 
+  // Common-sense suggestions: a day that's too full, and which visit to move to which day. (Dismissed ones stay hidden.)
+  const sugKey = (x) => `${x.stopId}:${x.from}:${x.to}`;
+  const suggestions = (planned?.suggestions || []).filter((x) => !saved.dismissed?.[sugKey(x)] && allStops.some((s) => s.id === x.stopId));
   const planDates = planned ? Object.keys(planned.days).filter((d) => planned.days[d].stops.length + planned.days[d].midday.length > 0).sort() : [];
   const [selected, setSelected] = useState(null);
   const date = planDates.includes(selected) ? selected : planDates[0] || null;
@@ -3056,6 +3076,37 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
         </div>
       )}
 
+      {suggestions.length > 0 && (
+        <div className="panel vp-suggest">
+          <div className="panel-head"><Route size={16} /><span>Suggestions</span></div>
+          {suggestions.map((x) => {
+            const stop = allStops.find((s) => s.id === x.stopId);
+            const first = firstName(x.name) || x.name;
+            const n = planned.days[x.from]?.stops.length || 0;
+            const why = x.bookedTime != null
+              ? `${x.name} was booked for ${fmtClock(x.bookedTime)}, but the times booked on ${dayTitle(x.from)} can't all be met — the drives between them are too far apart. This one eases it most.`
+              : x.notBefore != null
+                ? `${x.name} can't start before ${fmtClock(x.notBefore)}, and ${dayTitle(x.from)} is already packed (${n} visits), so they'd be squeezed in at the end of a long day.`
+                : `${dayTitle(x.from)} is packed (${n} visits) and ${x.name} has no time booked, so they're the easiest to move.`;
+            const body = `Hi ${first}, it's Artie from Lyons Fencing. Would ${dayTitleLong(x.to)}${x.notBefore != null ? ` after ${fmtClock(x.notBefore)}` : ""} suit for me to come out and look at the job instead? Cheers`;
+            return (
+              <div key={sugKey(x)} className="vp-sug">
+                <div className="vp-sug-main">
+                  <strong>Move {first} to {dayTitle(x.to)}</strong>
+                  <div className="calc-note" style={{ margin: "2px 0 0" }}>{why} {dayTitle(x.to)} has room{x.addsDriveMin > 0 ? `, adding about ${x.addsDriveMin} min of driving` : ""}.</div>
+                </div>
+                <div className="vp-actions">
+                  <button className="btn-primary small" onClick={() => { moveStop(stop, x.to); setNote(`Moved ${first} to ${dayTitle(x.to)}. Tap "Save this day's times" there to put the new date on their lead and your calendar.`); }}>Move to {dayTitle(x.to)}</button>
+                  {stop?.phone && <a className="btn-ghost small" href={smsHref(stop.phone, body)}><Send size={13} /> Text {first}</a>}
+                  <button className="btn-ghost small" onClick={() => patchSaved({ dismissed: { ...saved.dismissed, [sugKey(x)]: true } })}>Not now</button>
+                </div>
+              </div>
+            );
+          })}
+          <p className="calc-note" style={{ marginBottom: 0 }}>Only a suggestion — nothing changes until you tap Move, and the client isn't told unless you send the text.</p>
+        </div>
+      )}
+
       {(left.length > 0 || missing.length > 0 || (planned?.notes || []).length > 0) && (
         <div className="panel">
           <div className="panel-head"><AlertTriangle size={16} /><span>Left out of the plan</span></div>
@@ -3262,7 +3313,8 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
           onClose={() => setTextFor(null)}
           onApply={(patch) => {
             setLeads((rows) => rows.map((l) => (l.id === textFor.leadId ? { ...l, ...patch } : l)));
-            setNote(`Saved the text to ${textFor.name}'s notes${patch.visitDate ? " and set their visit day" : ""}.`);
+            const did = [patch.address && "address", patch.visitDate && "visit day", patch.notes !== undefined && patch.notes !== (leads.find((l) => l.id === textFor.leadId)?.notes ?? "") && "notes"].filter(Boolean);
+            setNote(`Updated ${textFor.name}'s ${did.length ? did.join(" and ") : "details"}.`);
             setTextFor(null);
           }}
         />
