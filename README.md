@@ -112,3 +112,7 @@ A calendar *subscription* (the older iPhone link above) is read-only. For change
 ## Site notes → draft quote
 
 Write the notes from a site visit in the lead's **Notes** box, one job per line, in plain shorthand — e.g. `26m 1.8 colorbond raked`, `remove old fence`, `1 gate`, `20m 2.1 timber lapped and capped`, `3 posts`, `vegetation`, `excavator`. The lead form shows a live "Quote preview"; **Start quote** (on the lead, in the Visit planner, or the Today list) then opens a quote with those lines filled in at your usual template rates, the job length/height set, the standard notes added, and the client's details copied across. A "Drafted from your site notes" box lists what it assumed (e.g. butted paling if you didn't say lapped) and anything that needs a price (retaining walls have no template). Anything it doesn't recognise is ignored, so ordinary notes can sit alongside. Code: `lib/siteNotes.js`.
+
+## Scan a receipt → expense
+
+In **Finances → Log expense**, **Scan receipt** takes a photo (or picks one) of a fuel or tip receipt and fills in the amount (the GST-inclusive total), date, category (Fuel / Tipping/waste / Other) and a description like "Fuel — Ampol diesel 52.31L". The photo is read on the phone itself with Tesseract (free, nothing is uploaded; the reader downloads the first time it's used) and the result is only ever a suggestion — check it, then Save. Code: `lib/ocr.js` (reads the photo), `lib/receipt.js` (works out the expense).

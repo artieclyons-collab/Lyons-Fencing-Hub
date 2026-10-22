@@ -38,6 +38,8 @@ import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
 import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, ownNotes } from "@/lib/availability";
 import { parseSiteNotes } from "@/lib/siteNotes";
+import { parseReceipt } from "@/lib/receipt";
+import { readReceipt } from "@/lib/ocr";
 import { buildDocumentHtml, DOC_CSS } from "@/lib/docHtml";
 
 // ---------- shared UI ----------
@@ -2355,9 +2357,47 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
 function ExpenseModal({ initial, onClose, onSave, onDelete }) {
   const [form, setForm] = useState({ description: "", category: EXPENSE_CATEGORIES[0], amount: "", date: today(), ...initial });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  // "Scan receipt": the photo is read on this phone (nothing is uploaded) and the form is filled in for you to check.
+  const [scan, setScan] = useState({ state: "idle", progress: 0, notes: [] });
+  const receiptInput = useRef(null);
+  const onReceipt = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setScan({ state: "reading", progress: 0, notes: [] });
+    try {
+      const text = await readReceipt(file, (p) => setScan((s) => ({ ...s, progress: p })));
+      const r = parseReceipt(text);
+      setForm((f) => ({
+        ...f,
+        ...(r.amount != null ? { amount: String(r.amount) } : {}),
+        ...(r.date ? { date: r.date } : {}),
+        category: r.category,
+        description: r.description || f.description,
+      }));
+      setScan({ state: "done", progress: 1, notes: r.notes, found: r.amount != null });
+    } catch (err) {
+      setScan({ state: "error", progress: 0, notes: [], message: err.message || "Couldn't read that photo." });
+    }
+  };
 
   return (
     <Modal title={initial?.id ? "Edit expense" : "Log expense"} onClose={onClose}>
+      {!initial?.id && (
+        <div className="receipt-scan">
+          <input ref={receiptInput} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onReceipt} />
+          <button type="button" className="btn-primary" onClick={() => receiptInput.current?.click()} disabled={scan.state === "reading"}>
+            <Camera size={15} /> {scan.state === "reading" ? `Reading receipt… ${Math.round((scan.progress || 0) * 100)}%` : "Scan receipt"}
+          </button>
+          {scan.state === "idle" && <span className="calc-note" style={{ margin: 0 }}>Photo of a fuel or tip receipt fills this in. The first time takes a little longer.</span>}
+          {scan.state === "done" && (
+            <span className="calc-note" style={{ margin: 0, color: scan.found ? "var(--good)" : "var(--bad)" }}>
+              {scan.found ? "Filled in from the photo — check the amount and date before saving." : "Couldn't find the total on that photo."} {scan.notes.join(" ")}
+            </span>
+          )}
+          {scan.state === "error" && <span className="calc-note" style={{ margin: 0, color: "var(--bad)" }}>{scan.message} You can still type it in.</span>}
+        </div>
+      )}
       <Field label="Description"><input value={form.description || ""} onChange={(e) => set("description", e.target.value)} placeholder="What was it for?" /></Field>
       <div className="field-pair">
         <Field label="Category">
