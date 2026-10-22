@@ -25,11 +25,26 @@ function client() {
   return { credentials, google: createGoogleClient({ credentials, calendarId: process.env.GOOGLE_CALENDAR_ID, apiBase: process.env.GOOGLE_API_BASE || undefined, tokenUrl: process.env.GOOGLE_TOKEN_URL || undefined }) };
 }
 
+// Says which piece is missing, without ever showing a value.
+function whyNot() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!raw) return "GOOGLE_SERVICE_ACCOUNT_JSON isn't set on this deployment";
+  if (!process.env.GOOGLE_CALENDAR_ID) return "GOOGLE_CALENDAR_ID isn't set on this deployment";
+  try {
+    const j = JSON.parse(raw);
+    if (!j.client_email) return "the key has no client_email";
+    if (!j.private_key) return "the key has no private_key";
+  } catch {
+    return `GOOGLE_SERVICE_ACCOUNT_JSON isn't valid JSON (starts with ${JSON.stringify(String(raw).slice(0, 1))}, ${String(raw).length} characters)`;
+  }
+  return "unknown";
+}
+
 let running = null; // one round at a time on this server
 
 export async function GET(req) {
   const c = client();
-  if (!c) return NextResponse.json({ configured: false }, NO_STORE);
+  if (!c) return NextResponse.json({ configured: false, why: whyNot() }, NO_STORE);
   const out = { configured: true, serviceAccount: c.credentials.client_email };
   if (new URL(req.url).searchParams.get("check")) {
     try {
