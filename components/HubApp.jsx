@@ -32,6 +32,7 @@ import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATIO
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import EmailModal from "./EmailModal";
+import MoveSheet from "./MoveSheet";
 import DaySheet from "./DaySheet";
 import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
@@ -2950,6 +2951,53 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
     if (date) setSelected(date);
   };
 
+  // ----- moving a visit (something came up): the new date goes straight onto the lead, with an Undo -----
+  const [moveFor, setMoveFor] = useState(null); // the visit whose Move screen is open
+  const [lastMove, setLastMove] = useState(null); // { leadId, name, prev: { visitDate, visitTime } } for Undo
+  useEffect(() => {
+    if (!lastMove) return undefined;
+    const timer = setTimeout(() => setLastMove(null), 15000);
+    return () => clearTimeout(timer);
+  }, [lastMove]);
+  const leadOf = (s) => leads.find((l) => l.id === s.leadId);
+  const rememberMove = (s, message) => {
+    const l = leadOf(s);
+    setLastMove({ leadId: s.leadId, name: s.name, prev: { visitDate: l?.visitDate || "", visitTime: l?.visitTime || "" } });
+    setNote(message);
+  };
+  const moveNow = (s, date, withText) => {
+    if (!s.leadId || !date) return;
+    rememberMove(s, `Moved ${s.name} to ${dayTitle(date)}. It's saved on their lead and your calendar.`);
+    // any older tentative move of this visit is replaced by the real date
+    const rest = { ...saved.moves };
+    delete rest[s.id];
+    patchSaved({ moves: rest });
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: date, visitTime: "" } : l)));
+    setSelected(date);
+    setMoveFor(null);
+    if (withText && s.phone) {
+      const first = firstName(s.name) || "there";
+      const body = `Hi ${first}, it's Artie from Lyons Fencing. No problem — would ${dayTitleLong(date)}${s.notBefore != null ? ` after ${fmtClock(s.notBefore)}` : ""} suit for me to come out and look at the job instead? Let me know. Cheers`;
+      setTimeout(() => { window.location.href = smsHref(s.phone, body); }, 500); // gives the save a moment to start first
+    }
+  };
+  const setStopTime = (s, hhmm) => {
+    rememberMove(s, hhmm ? `Set ${s.name}'s time to ${fmtClock(parseTime(hhmm))}.` : `Cleared ${s.name}'s time.`);
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitTime: hhmm || "" } : l)));
+    setMoveFor(null);
+  };
+  const autoPlace = (s) => {
+    rememberMove(s, `${s.name} no longer has a day, so the planner has placed them on the best one (marked "placed here"). Tap "Save this day's times" there to fix it.`);
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: "", visitTime: "" } : l)));
+    setMoveFor(null);
+  };
+  const undoMove = () => {
+    if (!lastMove) return;
+    setLeads((rows) => rows.map((l) => (l.id === lastMove.leadId ? { ...l, ...lastMove.prev } : l)));
+    setNote(`Put ${lastMove.name} back where they were.`);
+    setLastMove(null);
+  };
+
   // "On my way": works out when you'll really get there from where you are now, then opens a text to the client
   // ready to send (it goes from your own number, so replies land in your Messages).
   const onMyWay = async (s, entry) => {
@@ -3065,8 +3113,9 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
         ) : (
           <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Cancelled</button>
         )}
+        {s.leadId && <button className="btn-primary small" onClick={() => setMoveFor({ stop: s, fromDate: dd.date })} title="Move this visit to another day, or set a time"><Route size={13} /> Move…</button>}
         {!dd.saturday && dd.stops.length + dd.midday.length > 1 && (
-          <button className="btn-ghost small" onClick={() => moveStop(s, nextSaturdayIso(dd.date))}>
+          <button className="btn-ghost small" onClick={() => moveNow(s, nextSaturdayIso(dd.date), false)}>
             Move to Saturday{dd.moveSavings?.[s.id]?.driveMin >= 3 ? ` (saves ${Math.round(dd.moveSavings[s.id].driveMin)} min driving${dd.moveSavings[s.id].finishMin >= 10 ? `, home ${Math.round(dd.moveSavings[s.id].finishMin)} min earlier` : ""})` : ""}
           </button>
         )}
@@ -3093,7 +3142,24 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
       {matrix?.source === "estimate" && (
         <p className="calc-note">The routing service is busy, so these drive times are straight-line estimates, not real roads. Treat them as rough.</p>
       )}
-      {note && <p className="calc-note" style={{ color: "var(--good)" }}>{note}</p>}
+      {note && (
+        <p className="calc-note" style={{ color: "var(--good)" }}>
+          {note} {lastMove && <button className="link-btn" onClick={undoMove}><Undo2 size={12} style={{ verticalAlign: "-2px" }} /> Undo</button>}
+        </p>
+      )}
+      {moveFor && (
+        <MoveSheet
+          stop={moveFor.stop}
+          lead={leadOf(moveFor.stop)}
+          fromDate={moveFor.fromDate}
+          today={t}
+          fitFor={planned?.fitFor || (() => null)}
+          onMove={(date, withText) => moveNow(moveFor.stop, date, withText)}
+          onTime={(hhmm) => setStopTime(moveFor.stop, hhmm)}
+          onAuto={() => autoPlace(moveFor.stop)}
+          onClose={() => setMoveFor(null)}
+        />
+      )}
 
       {cancelHints.length > 0 && (
         <div className="panel vp-cancel">
@@ -3131,7 +3197,7 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
                   <div className="calc-note" style={{ margin: "2px 0 0" }}>{why} {dayTitle(x.to)} has room{x.addsDriveMin > 0 ? `, adding about ${x.addsDriveMin} min of driving` : ""}.</div>
                 </div>
                 <div className="vp-actions">
-                  <button className="btn-primary small" onClick={() => { moveStop(stop, x.to); setNote(`Moved ${first} to ${dayTitle(x.to)}. Tap "Save this day's times" there to put the new date on their lead and your calendar.`); }}>Move to {dayTitle(x.to)}</button>
+                  <button className="btn-primary small" onClick={() => moveNow(stop, x.to, false)}>Move to {dayTitle(x.to)}</button>
                   {stop?.phone && <a className="btn-ghost small" href={smsHref(stop.phone, body)}><Send size={13} /> Text {first}</a>}
                   <button className="btn-ghost small" onClick={() => patchSaved({ dismissed: { ...saved.dismissed, [sugKey(x)]: true } })}>Not now</button>
                 </div>

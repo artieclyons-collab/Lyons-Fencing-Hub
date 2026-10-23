@@ -499,3 +499,15 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .email-meta span{ color:var(--text-dim); min-width:64px; }
 .email-meta strong{ font-weight:600; word-break:break-all; }
 .email-others{ display:flex; flex-direction:column; gap:4px; margin-bottom:12px; padding:10px 12px; border:1px dashed var(--line); border-radius:8px; }
+
+/* Visit planner: Move screen */
+.vp-move-list{ display:flex; flex-direction:column; gap:6px; margin:12px 0; }
+.vp-move-row{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; padding:10px 12px; background:var(--surface2); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:8px; color:var(--text); font-family:inherit; cursor:pointer; }
+.vp-move-row span{ font-size:12px; color:var(--text-dim); }
+.vp-move-row.ok{ border-left-color:var(--good); }
+.vp-move-row.warn{ border-left-color:var(--hivis); }
+.vp-move-row.bad{ border-left-color:var(--bad); }
+.vp-move-row.bad span{ color:var(--bad); }
+.vp-move-row.best{ background:rgba(232,185,35,.10); border-color:var(--hivis); }
+.vp-move-row:hover{ border-color:var(--hivis); }
+.vp-move-extra{ display:flex; flex-direction:column; gap:10px; padding-top:12px; border-top:1px solid var(--line); }
