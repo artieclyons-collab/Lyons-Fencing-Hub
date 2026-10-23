@@ -8,11 +8,13 @@ import EmailModal from "./EmailModal";
 import { money, today, itemsTotal, gstBreakdown, isDepositInvoice } from "@/lib/logic";
 import { isIsoDate } from "@/lib/jobSchedule";
 import { FOLLOW_UP_DAYS } from "@/lib/schedule";
+import { BIZ } from "@/lib/constants";
 
 export const CHASE_DAYS = 7; // an invoice is chased this long after it was issued
 const REPEAT_DAYS = 7; // and again this long after each text
 const QUOTE_WINDOW_DAYS = 30; // follow-ups stop after a month (a quote that old is probably dead)
 const TEXTS_KEY = "lyons:texts";
+const REVIEW_WINDOW_DAYS = 21; // review requests are offered for this long after a final invoice is paid
 const SHOW_FIRST = 6; // the rest sit behind "Show more" so the Board doesn't get long
 const START_SOON_DAYS = 14; // start-date texts are offered for jobs starting within this many days
 
@@ -20,6 +22,7 @@ export const DEFAULT_TEXTS = {
   followUp: "Hi {name}, it's Artie from Lyons Fencing. Just following up on the fencing quote ({doc}) I sent through {days} days ago. Let me know if you have any questions or would like to go ahead. Cheers, Artie",
   startConfirm: "Hi {name}, it's Artie from Lyons Fencing. Thanks for accepting the quote! I've got you booked in to start on {date}. I'll be in touch beforehand if anything changes. Cheers, Artie",
   startChange: "Hi {name}, it's Artie from Lyons Fencing. Just letting you know your start date has changed to {date}. Sorry for any inconvenience, and let me know if that doesn't suit. Cheers, Artie",
+  review: "Hi {name}, it's Artie from Lyons Fencing. Thanks again for choosing us for your fencing. If you're happy with it, a quick Google review would really help a small local business: {link} Cheers, Artie",
   chase: "Hi {name}, it's Artie from Lyons Fencing. Just a quick reminder that {what} for {total} is still outstanding. The payment details are on the invoice. Let me know if you have any questions. Thanks, Artie",
 };
 
@@ -32,8 +35,8 @@ const first = (name) => {
   const n = String(name || "").replace(/\(.*?\)/g, "").trim().split(/\s+/)[0] || "";
   return /^(n\/?a|lead|client)$/i.test(n) ? "" : n;
 };
-const emailKind = { quote: "followup", job: "start", invoice: "chase" };
-const isEmailish = (s) => /^[^s@]+@[^s@]+.[^s@]{2,}$/.test(String(s || "").trim());
+const emailKind = { quote: "followup", job: "start", invoice: "chase", review: "review" };
+const isEmailish = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s || "").trim());
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 const incTotal = (items) => gstBreakdown(itemsTotal(items)).total;
 const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/^Hi ,/, "Hi,");
@@ -50,8 +53,8 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     if (isEmailish(doc.clientEmail)) return doc.clientEmail.trim();
     const q = doc.quoteId ? quotes.find((x) => x.id === doc.quoteId) : null;
     if (q && isEmailish(q.clientEmail)) return q.clientEmail.trim();
-    const phone = String(doc.clientPhone || q?.clientPhone || "").replace(/D/g, "").slice(-9);
-    const l = leads.find((x) => isEmailish(x.email) && ((phone.length >= 8 && String(x.phone || "").replace(/D/g, "").slice(-9) === phone) || norm(x.name) === norm(doc.clientName)));
+    const phone = String(doc.clientPhone || q?.clientPhone || "").replace(/\D/g, "").slice(-9);
+    const l = leads.find((x) => isEmailish(x.email) && ((phone.length >= 8 && String(x.phone || "").replace(/\D/g, "").slice(-9) === phone) || norm(x.name) === norm(doc.clientName)));
     return l ? l.email.trim() : "";
   };
   for (const q of quotes) {
@@ -91,6 +94,17 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     const body = fill(texts.chase, { name: first(i.clientName), doc: i.docNumber || "invoice", what, total, days: age });
     out.push({ key: `i:${i.id}`, kind: "invoice", email: emailFor(i), id: i.id, age, badge: `${age}d`, mark: { field: "lastChase", value: today() }, who: i.clientName || "Client", what: `${i.docNumber || "Invoice"} · ${total} inc. GST`, label: since != null ? "Chase again" : "Chase payment", phone: phoneFor(i), body });
   }
+  // Paid final invoices: a day or more after being paid, ask for a Google review (once; remembered as "review:<date>" on the invoice).
+  for (const i of invoices) {
+    if (i.status !== "Paid" || isDepositInvoice(i) || String(i.lastChase || "").startsWith("review:")) continue;
+    const age = daysAgo(i.paidDate || i.issuedDate);
+    if (age == null || age < 1 || age > REVIEW_WINDOW_DAYS) continue;
+    const link = BIZ.reviewUrl || "";
+    // with no review link saved, the sentence just ends there instead of pointing nowhere
+    const tpl = link ? texts.review : texts.review.replace(": {link}", ".");
+    const body = fill(tpl, { name: first(i.clientName), link });
+    out.push({ key: `r:${i.id}`, kind: "review", email: emailFor(i), id: i.id, age, badge: `${age}d`, mark: { field: "lastChase", value: `review:${today()}` }, who: i.clientName || "Client", what: `${i.docNumber || "Invoice"} paid`, label: "Ask for a review", phone: phoneFor(i), body });
+  }
   // Start dates first (soonest first), then the rest oldest first.
   const rank = (x) => (x.kind === "job" ? 0 : 1);
   return out.sort((a, b) => rank(a) - rank(b) || b.age - a.age); // a job's age is minus its days to go, so soonest first
@@ -115,7 +129,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
 
   const markDone = (item) => {
     const patch = (rows) => rows.map((r) => (r.id === item.id ? { ...r, [item.mark.field]: item.mark.value } : r));
-    if (item.kind === "invoice") setInvoices(patch);
+    if (item.kind === "invoice" || item.kind === "review") setInvoices(patch);
     else setQuotes(patch);
     setPending(null);
   };
@@ -147,7 +161,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
           <div className="upcoming-date">{item.badge}</div>
           <div className="text-main">
             <div className="upcoming-name">{item.who}</div>
-            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "job" ? "Booked job" : "Quote"} · {item.what}</div>
+            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "review" ? "Review request" : item.kind === "job" ? "Booked job" : "Quote"} · {item.what}</div>
             {pending === item.key ? (
               <div className="text-confirm">
                 Did you send it?
@@ -188,7 +202,7 @@ function WordingModal({ texts, onSave, onClose }) {
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body">
-          <p className="calc-note">Saved on this device. You can use these blanks and they're filled in for each client: <code>{"{name}"}</code> first name, <code>{"{doc}"}</code> quote or invoice number, <code>{"{days}"}</code> days since it was sent, <code>{"{total}"}</code> amount inc. GST, <code>{"{date}"}</code> the start date, <code>{"{what}"}</code> "invoice INV-123" or "the deposit invoice INV-123", <code>{"{job}"}</code> type of job.</p>
+          <p className="calc-note">Saved on this device. You can use these blanks and they're filled in for each client: <code>{"{name}"}</code> first name, <code>{"{doc}"}</code> quote or invoice number, <code>{"{days}"}</code> days since it was sent, <code>{"{total}"}</code> amount inc. GST, <code>{"{date}"}</code> the start date, <code>{"{link}"}</code> your Google review link, <code>{"{what}"}</code> "invoice INV-123" or "the deposit invoice INV-123", <code>{"{job}"}</code> type of job.</p>
           <label className="field">
             <span>Quote follow-up</span>
             <textarea rows={4} value={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.value })} />
@@ -204,6 +218,11 @@ function WordingModal({ texts, onSave, onClose }) {
             <textarea rows={3} value={form.startChange} onChange={(e) => setForm({ ...form, startChange: e.target.value })} />
           </label>
           <button className="link-btn" onClick={() => setForm({ ...form, startChange: DEFAULT_TEXTS.startChange })}>Reset this one</button>
+          <label className="field" style={{ marginTop: 12 }}>
+            <span>Review request (the link comes from your business details)</span>
+            <textarea rows={4} value={form.review} onChange={(e) => setForm({ ...form, review: e.target.value })} />
+          </label>
+          <button className="link-btn" onClick={() => setForm({ ...form, review: DEFAULT_TEXTS.review })}>Reset this one</button>
           <label className="field" style={{ marginTop: 12 }}>
             <span>Invoice chaser</span>
             <textarea rows={4} value={form.chase} onChange={(e) => setForm({ ...form, chase: e.target.value })} />

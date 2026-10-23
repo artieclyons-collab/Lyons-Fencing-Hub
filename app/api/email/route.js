@@ -147,6 +147,7 @@ async function handle(req) {
     if (body.kind === "followup") patch.lastFollowUp = todayBrisbane();
     if (body.kind === "start") patch.lastFollowUp = `start:${rec.startDate}`;
     if (body.kind === "chase") patch.lastChase = todayBrisbane();
+    if (body.kind === "review") patch.lastChase = `review:${todayBrisbane()}`;
     try {
       await safeUpdate(spec.table, rec.id, patch);
     } catch (e) {

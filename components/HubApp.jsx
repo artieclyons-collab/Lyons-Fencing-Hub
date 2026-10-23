@@ -38,7 +38,7 @@ import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
-import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, ownNotes } from "@/lib/availability";
+import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, rescheduleHint, ownNotes } from "@/lib/availability";
 import { parseSiteNotes } from "@/lib/siteNotes";
 import { parseReceipt } from "@/lib/receipt";
 import { extractAddress } from "@/lib/enquiry";
@@ -606,6 +606,12 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
     attention.push({ key: "cancel", bad: true, icon: AlertTriangle, tab: "visits",
       text: `${plural(maybeCancelled.length, "client")} may have cancelled by text — check before you drive out`,
       sub: names(maybeCancelled, (l) => String(l.name || "").replace(/\?/g, "").trim()) });
+  }
+  const askedToMove = leads.filter((l) => l.status !== "Lost" && rescheduleHint(l.notes, t));
+  if (askedToMove.length > 0) {
+    attention.push({ key: "resched", icon: CalendarDays, tab: "visits",
+      text: `${plural(askedToMove.length, "client")} asked to reschedule by text — tap to move ${askedToMove.length === 1 ? "them" : "them"}`,
+      sub: names(askedToMove, (l) => String(l.name || "").replace(/\?/g, "").trim()) });
   }
   if (acceptedNoDate.length > 0) {
     attention.push({ key: "nodate", icon: CalendarDays, onClick: () => setScheduleOpen(true),
@@ -2801,7 +2807,7 @@ function TextImportModal({ lead, onApply, onClose }) {
   );
 }
 
-function VisitPlanner({ leads, quotes, setLeads, go }) {
+function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
   const t = today();
   const { confirmed, flexible, left } = useMemo(() => collectVisits(leads, quotes, t), [leads, quotes, t]);
   const allStops = useMemo(() => [...confirmed, ...flexible], [confirmed, flexible]);
@@ -2931,6 +2937,50 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
     setAskRemove(null);
   };
   // "Checked: ..." after a flagged text means you've looked at it and they're still on.
+  // ----- clients who texted asking to move things -----
+  const addLine = (notes, line) => [String(notes || "").trim(), line].filter(Boolean).join("\n");
+  const sameClient = (q, l) => {
+    const tail9 = (p) => String(p || "").replace(/\D/g, "").slice(-9);
+    const nm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return (tail9(q.clientPhone).length >= 8 && tail9(q.clientPhone) === tail9(l.phone)) || (nm(q.clientName) && nm(q.clientName) === nm(l.name));
+  };
+  const rescheduleReqs = leads
+    .filter((l) => l.status !== "Lost")
+    .map((l) => {
+      const hint = rescheduleHint(l.notes, t);
+      if (!hint) return null;
+      const visit = ["New", "Contacted"].includes(l.status);
+      const job = visit ? null : quotes.find((q) => q.status === "Accepted" && isIsoDate(q.startDate) && q.startDate >= t && sameClient(q, l));
+      if (!visit && !job) return null;
+      // "push it back" can't mean an earlier day than the one they have now, so don't guess in that case.
+      const current = job?.startDate || l.visitDate || "";
+      const pushing = /\b(push|postpone|delay|later|back)\b/i.test(hint.text);
+      const day = hint.day && current && hint.day < current && pushing ? null : hint.day;
+      return { lead: l, hint: { ...hint, day }, job, kind: visit ? "visit" : "job" };
+    })
+    .filter(Boolean);
+  // "Checked: …" after a flagged text means it's been dealt with, so it stops showing.
+  const dismissReschedule = (r) => {
+    setLeads((rows) => rows.map((l) => (l.id === r.lead.id ? { ...l, notes: addLine(l.notes, `Checked: no change needed (${todayLabel}).`) } : l)));
+    setNote(`Okay — ${r.lead.name} stays as they are.`);
+  };
+  const applyReschedule = (r, date, withText) => {
+    const stamp = `Checked: moved to ${dayTitle(date)} (${todayLabel}).`;
+    if (r.kind === "visit") {
+      rememberMove({ leadId: r.lead.id, name: r.lead.name }, `Moved ${r.lead.name}'s visit to ${dayTitle(date)}.`);
+      setLeads((rows) => rows.map((l) => (l.id === r.lead.id ? { ...l, visitDate: date, visitTime: "", notes: addLine(l.notes, stamp) } : l)));
+      setSelected(date);
+    } else {
+      setQuotes((rows) => rows.map((q) => (q.id === r.job.id ? { ...q, startDate: date } : q)));
+      setLeads((rows) => rows.map((l) => (l.id === r.lead.id ? { ...l, notes: addLine(l.notes, stamp) } : l)));
+    }
+    if (r.kind === "job") setNote(`Moved ${r.lead.name}'s job start to ${dayTitle(date)}.`);
+    if (withText && r.lead.phone) {
+      const first = firstName(r.lead.name) || "there";
+      const body = `Hi ${first}, no problem — I've moved you to ${dayTitleLong(date)}. See you then. Cheers, Artie`;
+      setTimeout(() => { window.location.href = smsHref(r.lead.phone, body); }, 500);
+    }
+  };
   const keepVisit = (s) => {
     setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, notes: [String(l.notes || "").trim(), `Checked: still wants a quote (${todayLabel}).`].filter(Boolean).join("\n") } : l)));
     setNote(`Okay — ${s.name} stays in the plan.`);
@@ -2962,7 +3012,7 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
   const leadOf = (s) => leads.find((l) => l.id === s.leadId);
   const rememberMove = (s, message) => {
     const l = leadOf(s);
-    setLastMove({ leadId: s.leadId, name: s.name, prev: { visitDate: l?.visitDate || "", visitTime: l?.visitTime || "" } });
+    setLastMove({ leadId: s.leadId, name: s.name, prev: { visitDate: l?.visitDate || "", visitTime: l?.visitTime || "", notes: l?.notes ?? "" } });
     setNote(message);
   };
   const moveNow = (s, date, withText) => {
@@ -2972,7 +3022,7 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
     const rest = { ...saved.moves };
     delete rest[s.id];
     patchSaved({ moves: rest });
-    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: date, visitTime: "" } : l)));
+    setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: date, visitTime: "", notes: rescheduleHint(l.notes, t) ? addLine(l.notes, `Checked: moved to ${dayTitle(date)} (${todayLabel}).`) : l.notes } : l)));
     setSelected(date);
     setMoveFor(null);
     if (withText && s.phone) {
@@ -3159,6 +3209,39 @@ function VisitPlanner({ leads, quotes, setLeads, go }) {
           onAuto={() => autoPlace(moveFor.stop)}
           onClose={() => setMoveFor(null)}
         />
+      )}
+
+      {rescheduleReqs.length > 0 && (
+        <div className="panel vp-resched">
+          <div className="panel-head"><CalendarDays size={16} /><span>Asked to reschedule</span></div>
+          {rescheduleReqs.map((r) => {
+            const first = firstName(r.lead.name) || r.lead.name;
+            const what = r.kind === "job" ? "job start" : "visit";
+            const stop = r.kind === "visit" ? allStops.find((s) => s.leadId === r.lead.id) : null;
+            return (
+              <div key={r.lead.id} className="vp-cancel-row">
+                <div>
+                  <strong>{r.lead.name}</strong> texted: “{r.hint.text.length > 140 ? `${r.hint.text.slice(0, 140)}…` : r.hint.text}”
+                  <div className="calc-note" style={{ margin: "2px 0 0" }}>
+                    {r.kind === "job" ? `Their job is booked to start ${dayTitle(r.job.startDate)}.` : r.lead.visitDate ? `Their visit is on ${dayTitle(r.lead.visitDate)}.` : "They don't have a visit day yet."}
+                    {r.hint.day ? ` They seem to mean ${dayTitleLong(r.hint.day)}.` : " They didn't say which day."}
+                  </div>
+                </div>
+                <div className="vp-actions">
+                  {r.hint.day && <button className="btn-primary small" onClick={() => applyReschedule(r, r.hint.day, false)}>Move {what} to {dayTitle(r.hint.day)}</button>}
+                  {r.hint.day && r.lead.phone && <button className="btn-ghost small" onClick={() => applyReschedule(r, r.hint.day, true)}><Send size={13} /> Move &amp; text them</button>}
+                  {stop ? (
+                    <button className="btn-ghost small" onClick={() => setMoveFor({ stop, fromDate: r.lead.visitDate || t })}>Choose another day…</button>
+                  ) : (
+                    <label className="vp-nb">Another day <input type="date" min={t} onChange={(ev) => ev.target.value && applyReschedule(r, ev.target.value, false)} /></label>
+                  )}
+                  <button className="btn-ghost small" onClick={() => dismissReschedule(r)}>Leave as is</button>
+                </div>
+              </div>
+            );
+          })}
+          <p className="calc-note" style={{ marginBottom: 0 }}>Nothing moves until you tap — I only read the day they mention. "Move &amp; text them" opens a message confirming the new day for you to send.</p>
+        </div>
       )}
 
       {cancelHints.length > 0 && (
@@ -3590,7 +3673,7 @@ export default function HubApp() {
           <>
             {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
             {tab === "leads" && <Leads leads={leads} setLeads={setLeads} go={go} />}
-            {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} go={go} />}
+            {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
             {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}

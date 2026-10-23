@@ -511,3 +511,4 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .vp-move-row.best{ background:rgba(232,185,35,.10); border-color:var(--hivis); }
 .vp-move-row:hover{ border-color:var(--hivis); }
 .vp-move-extra{ display:flex; flex-direction:column; gap:10px; padding-top:12px; border-top:1px solid var(--line); }
+.vp-resched{ border-color:var(--hivis); }

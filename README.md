@@ -139,3 +139,9 @@ The address always comes from the email saved on that quote/invoice (copied from
 ## Materials calculator — Colorbond bays and rakes
 
 Colorbond runs are split into standard bays (2365mm rail, 3 sheets) plus, where it fits the length better, one long bay at the end (3125mm rail, 4 sheets): e.g. 24m = 9 standard + 1 long (31 sheets) rather than 11 standard (33 sheets). Each bay has 2 rails, 2 posts and 2 bags of concrete. Typing a bay width overrides this. Tick **Raked** (set automatically when the quote has a raked line) and a 1.8m fence lists the 2.1H sheets (cut down to follow the slope). Code: `colorbondBays` / `calcMaterials` in `lib/logic.js`.
+
+## Reschedule requests and review requests
+
+**Asked to reschedule:** when a client's text asks to move things ("can we do Monday instead?", "push it to next week"), the Board shows "N clients asked to reschedule by text" and the Visit planner shows an **Asked to reschedule** panel. For a quote visit it offers **Move visit to {the day they mention}**, **Move & text them** (opens a confirmation text), **Choose another day…** (the Move screen) and **Leave as is**; for a booked job (an accepted quote) it moves the job's start date the same way. Nothing moves until you tap — the day is only read from their text ("push back" never proposes an earlier day than they have now), and a "Checked: …" line in the notes clears the flag. Code: `rescheduleHint` in `lib/availability.js`.
+
+**Review requests:** in **Texts to send**, a paid final invoice gets an "Ask for a review" row (text and, if they have an email, an email) from the day after it's paid for 3 weeks, once (remembered as `review:<date>` on the invoice). Put your Google review link in `BIZ.reviewUrl` in `lib/constants.js` (Google Business Profile → Ask for reviews → copy link) and it's added to the message.
