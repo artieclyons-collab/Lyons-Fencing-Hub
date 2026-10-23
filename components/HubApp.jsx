@@ -9,7 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail,
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical,
 } from "lucide-react";
 
 import {
@@ -33,6 +33,7 @@ import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import EmailModal from "./EmailModal";
 import MoveSheet from "./MoveSheet";
+import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
 import { quoteFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
@@ -2816,7 +2817,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
   const locStops = useMemo(() => [...allStops, { id: HOME.id, query: HOME.query }, ...jobs.map((j) => ({ id: j.id, query: j.query }))], [allStops, jobs]);
 
   // What you've chosen (kept on this device): which view, per-day start settings, locked times, visit lengths.
-  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, midday: {}, dismissed: {}, workStart: WORK_START, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
+  const [saved, setSaved] = useState(() => ({ mode: "best", overrides: {}, locks: {}, durations: {}, moves: {}, midday: {}, orders: {}, dismissed: {}, workStart: WORK_START, smsTemplate: DEFAULT_SMS, ...readLS(PLAN_KEY, {}) }));
   useEffect(() => writeLS(PLAN_KEY, saved), [saved]);
   const patchSaved = (patch) => setSaved((s) => ({ ...s, ...patch }));
 
@@ -2880,8 +2881,8 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
   // ----- 3) the plan -----
   const planned = useMemo(() => {
     if (!matrix || matrix.key !== nodeKey) return null;
-    return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves, midday: saved.midday, jobs, workStart: saved.workStart, today: t });
-  }, [matrix, nodeKey, confirmed, flexible, coords, index, jobs, t, saved.overrides, saved.locks, saved.durations, saved.moves, saved.midday, saved.workStart]);
+    return runPlan({ confirmed, flexible, coords, minutesRaw: matrix.minutesRaw, index, overrides: saved.overrides, locks: saved.locks, durations: saved.durations, moves: saved.moves, midday: saved.midday, orders: saved.orders, jobs, workStart: saved.workStart, today: t });
+  }, [matrix, nodeKey, confirmed, flexible, coords, index, jobs, t, saved.overrides, saved.locks, saved.durations, saved.moves, saved.midday, saved.orders, saved.workStart]);
 
   // Common-sense suggestions: a day that's too full, and which visit to move to which day. (Dismissed ones stay hidden.)
   const sugKey = (x) => `${x.stopId}:${x.from}:${x.to}`;
@@ -3041,6 +3042,22 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
     setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: "", visitTime: "" } : l)));
     setMoveFor(null);
   };
+  // Dragging a visit: up/down within the day changes the order (times re-work themselves); onto a day chip moves it to that day.
+  const { drag, listRef, gripProps } = useVisitDrag({
+    onReorder: (date, ids) => {
+      patchSaved({ orders: { ...saved.orders, [date]: ids } });
+      setNote("Order changed — the times have been re-worked. Tap “Save this day's times” to keep them.");
+    },
+    onDropOnDay: (id, date) => {
+      const st = allStops.find((x) => x.id === id);
+      if (st) moveNow(st, date, false);
+    },
+  });
+  const resetOrder = (date) => {
+    const rest = { ...saved.orders };
+    delete rest[date];
+    patchSaved({ orders: rest });
+  };
   const undoMove = () => {
     if (!lastMove) return;
     setLeads((rows) => rows.map((l) => (l.id === lastMove.leadId ? { ...l, ...lastMove.prev } : l)));
@@ -3196,6 +3213,18 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
         <p className="calc-note" style={{ color: "var(--good)" }}>
           {note} {lastMove && <button className="link-btn" onClick={undoMove}><Undo2 size={12} style={{ verticalAlign: "-2px" }} /> Undo</button>}
         </p>
+      )}
+      {drag && (
+        <div className="vp-dragbar" role="presentation">
+          <span>Drop on a day to move there:</span>
+          <div className="vp-dragbar-days">
+            {Array.from({ length: 10 }, (_, i) => addDaysIso(t, i))
+              .filter((dt) => dt !== drag.date && new Date(`${dt}T00:00:00Z`).getUTCDay() !== 0)
+              .map((dt) => (
+                <button key={dt} type="button" data-drop-day={dt} className={drag.overDay === dt ? "on" : ""}>{dayTitle(dt)}</button>
+              ))}
+          </div>
+        </div>
       )}
       {moveFor && (
         <MoveSheet
@@ -3395,7 +3424,14 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
           )}
           {saved.mode === "keep" && (!keep || keep.infeasible) && <p className="calc-note">Your booked times can't all be met, so this shows the best route instead.</p>}
 
-          <div className="vp-stops">
+          {saved.orders?.[d.date] && (
+            <p className="calc-note">
+              {view.forcedBroken ? "That order would miss a locked time, so the best route is shown instead. " : "You set the order for this day. "}
+              <button className="link-btn" onClick={() => resetOrder(d.date)}>Back to the best route</button>
+            </p>
+          )}
+          {view.entries.length > 1 && <p className="calc-note" style={{ marginTop: 0 }}><GripVertical size={12} style={{ verticalAlign: "-2px" }} /> Hold the grip beside a visit and drag it up or down to change the order — or drop it on a day at the top to move it there.</p>}
+          <div className="vp-stops" ref={listRef}>
             {d.midday.map((m) => (
               <div key={m.id}>
                 <div className="vp-leg"><Car size={13} /> Out of {d.job.name}'s job at {clock5(m.leave)} · {Math.round(m.driveMin)} min drive</div>
@@ -3417,13 +3453,19 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
             {view.entries.map((e, i) => {
               const s = d.stops.find((x) => x.id === e.id);
               const shift = e.preferred != null ? r5(e.start) - e.preferred : null;
+              const orderIds = view.entries.map((x) => x.id);
+              const dragging = drag && drag.date === d.date;
+              const others = dragging ? orderIds.filter((x) => x !== drag.id) : [];
+              const lineHere = dragging && !drag.overDay && e.id !== drag.id && others[drag.index] === e.id;
               return (
-                <div key={e.id}>
+                <div key={e.id} data-stop-id={e.id}>
+                  {lineHere && <div className="vp-drop-line" />}
                   <div className="vp-leg"><Car size={13} /> {Math.round(e.driveMin)} min drive</div>
-                  <div className={`vp-stop${e.lateBy > 0 ? " late" : ""}`}>
-                    <div className="vp-time">
+                  <div className={`vp-stop${e.lateBy > 0 ? " late" : ""}${dragging && drag.id === e.id ? " vp-dragging" : ""}`}>
+                    <div className="vp-time vp-grip" {...gripProps(e.id, d.date, orderIds)} title="Hold and drag to reorder, or drop on a day above">
                       <strong>{clock5(e.start)}</strong>
                       <span>{clock5(e.end)}</span>
+                      <GripVertical size={16} className="vp-grip-icon" />
                     </div>
                     <div className="vp-body">
                       <div className="vp-name">{i + 1}. {s.name}{s.jobType ? <span className="vp-type">{s.jobType}</span> : null}{s.movedFrom ? <span className="vp-badge moved">moved from {dayTitle(s.movedFrom)}</span> : null}{s.placed ? <span className="vp-badge placed">placed here</span> : null}</div>
@@ -3442,6 +3484,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
                 </div>
               );
             })}
+            {drag && drag.date === d.date && !drag.overDay && drag.index >= view.entries.length - 1 && <div className="vp-drop-line" />}
             {view.entries.length > 0 && <div className="vp-leg"><Car size={13} /> Then about {Math.round(view.endLegMin)} min {planned.hasHome ? "home to Matilda St" : "back to Burleigh"}</div>}
           </div>
 

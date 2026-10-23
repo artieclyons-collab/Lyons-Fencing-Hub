@@ -512,3 +512,14 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .vp-move-row:hover{ border-color:var(--hivis); }
 .vp-move-extra{ display:flex; flex-direction:column; gap:10px; padding-top:12px; border-top:1px solid var(--line); }
 .vp-resched{ border-color:var(--hivis); }
+
+/* Visit planner: dragging a visit */
+.vp-grip{ cursor:grab; align-items:center; gap:2px; }
+.vp-grip-icon{ margin-top:6px; color:var(--text-dim); }
+.vp-dragging{ opacity:.55; outline:2px dashed var(--hivis); }
+.vp-drop-line{ height:4px; margin:4px 0; border-radius:2px; background:var(--hivis); }
+.vp-dragbar{ position:fixed; left:0; right:0; top:env(safe-area-inset-top, 0px); z-index:120; padding:10px 12px; background:var(--surface); border-bottom:2px solid var(--hivis); box-shadow:0 6px 20px rgba(0,0,0,.5); }
+.vp-dragbar > span{ display:block; font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+.vp-dragbar-days{ display:flex; gap:6px; overflow-x:auto; }
+.vp-dragbar-days button{ flex:none; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--surface2); color:var(--text); font-family:inherit; font-size:13px; }
+.vp-dragbar-days button.on{ background:var(--hivis); color:#1a1a1a; border-color:var(--hivis); font-weight:700; }
