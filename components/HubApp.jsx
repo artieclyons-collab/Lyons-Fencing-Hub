@@ -31,6 +31,8 @@ import {
 import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
+import IntroTextModal from "./IntroTextModal";
+import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
@@ -693,7 +695,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         )}
       </div>
 
-      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} />
+      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
 
       <div className="panel">
         <div className="panel-head">
@@ -755,6 +757,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 // ---------- Leads ----------
 function Leads({ leads, setLeads, go }) {
   const [modal, setModal] = useState(null); // {mode:'new'|'edit', data}
+  const [introFor, setIntroFor] = useState(null); // the new lead whose first text is being written
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const visibleLeads = leads.filter((l) => (!statusFilter || l.status === statusFilter) && matchesQuery(leadText(l), query));
@@ -804,6 +807,9 @@ function Leads({ leads, setLeads, go }) {
                   {l.visitDate ? ` · Site visit ${formatDateAU(l.visitDate)}${l.visitTime ? ` ${l.visitTime}` : ""}` : ""}
                 </div>
               </div>
+              {needsIntro(l) && (
+                <button className="btn-primary small" onClick={(e) => { e.stopPropagation(); setIntroFor(l); }} title="A first text to send from your phone, ready to edit"><Send size={13} /> Intro text</button>
+              )}
               {["New", "Contacted"].includes(l.status) && (
                 <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); go("quotes", { newFromLead: l }); }} title="Start a quote with their details filled in"><FileText size={13} /> Start quote</button>
               )}
@@ -812,6 +818,8 @@ function Leads({ leads, setLeads, go }) {
           ))}
         </div>
       )}
+
+      {introFor && <IntroTextModal lead={introFor} onClose={() => setIntroFor(null)} onSent={(lead) => setLeads((ls) => ls.map((x) => (x.id === lead.id && x.status === "New" ? { ...x, status: "Contacted" } : x)))} />}
 
       {modal && (
         <LeadModal

@@ -5,6 +5,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { Send, Copy, Check, Pencil, X, Phone, Mail } from "lucide-react";
 import EmailModal from "./EmailModal";
+import IntroTextModal from "./IntroTextModal";
+import { INTRO_TEXTS, introDraft, needsIntro, smsLink } from "@/lib/introText";
 import { money, today, itemsTotal, gstBreakdown, isDepositInvoice } from "@/lib/logic";
 import { isIsoDate } from "@/lib/jobSchedule";
 import { FOLLOW_UP_DAYS } from "@/lib/schedule";
@@ -19,6 +21,7 @@ const SHOW_FIRST = 6; // the rest sit behind "Show more" so the Board doesn't ge
 const START_SOON_DAYS = 14; // start-date texts are offered for jobs starting within this many days
 
 export const DEFAULT_TEXTS = {
+  ...INTRO_TEXTS,
   followUp: "Hi {name}, it's Artie from Lyons Fencing. Just following up on the fencing quote ({doc}) I sent through {days} days ago. Let me know if you have any questions or would like to go ahead. Cheers, Artie",
   startConfirm: "Hi {name}, it's Artie from Lyons Fencing. Thanks for accepting the quote! I've got you booked in to start on {date}. I'll be in touch beforehand if anything changes. Cheers, Artie",
   startChange: "Hi {name}, it's Artie from Lyons Fencing. Just letting you know your start date has changed to {date}. Sorry for any inconvenience, and let me know if that doesn't suit. Cheers, Artie",
@@ -40,10 +43,6 @@ const isEmailish = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s || "").t
 const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 const incTotal = (items) => gstBreakdown(itemsTotal(items)).total;
 const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/^Hi ,/, "Hi,");
-const smsLink = (phone, body) => {
-  const sep = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "&" : "?";
-  return `sms:${String(phone).replace(/[^\d+]/g, "")}${sep}body=${encodeURIComponent(body)}`;
-};
 
 // Everything due right now, oldest first. `texts` is the wording; leads/quotes supply phone numbers for invoices.
 export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
@@ -105,18 +104,26 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
     const body = fill(tpl, { name: first(i.clientName), link });
     out.push({ key: `r:${i.id}`, kind: "review", email: emailFor(i), id: i.id, age, badge: `${age}d`, mark: { field: "lastChase", value: `review:${today()}` }, who: i.clientName || "Client", what: `${i.docNumber || "Invoice"} paid`, label: "Ask for a review", phone: phoneFor(i), body });
   }
-  // Start dates first (soonest first), then the rest oldest first.
-  const rank = (x) => (x.kind === "job" ? 0 : 1);
+  // New hipages leads waiting for a first message (a draft to check and send — see IntroTextModal).
+  for (const l of leads) {
+    if (l.source !== "hipages" || !needsIntro(l)) continue;
+    const age = daysAgo(l.createdAt) ?? 0;
+    if (age > 14) continue;
+    out.push({ key: `l:${l.id}`, kind: "lead", lead: l, id: l.id, email: "", age: 0, badge: "new", who: l.name || "New lead", what: `${l.jobType || "Fencing"}${l.address ? ` · ${l.address}` : ""}`, label: "Write intro text", phone: l.phone, body: introDraft(l, texts) });
+  }
+  // New leads first, then start dates (soonest first), then the rest oldest first.
+  const rank = (x) => (x.kind === "lead" ? -1 : x.kind === "job" ? 0 : 1);
   return out.sort((a, b) => rank(a) - rank(b) || b.age - a.age); // a job's age is minus its days to go, so soonest first
 }
 
-export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInvoices }) {
+export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInvoices, setLeads }) {
   const [texts, setTexts] = useState(DEFAULT_TEXTS);
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(null); // key waiting for "did you send it?"
   const [copied, setCopied] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [emailing, setEmailing] = useState(null); // the item whose email is being prepared
+  const [intro, setIntro] = useState(null); // the new lead whose first text is being written
   useEffect(() => {
     try { setTexts({ ...DEFAULT_TEXTS, ...(JSON.parse(window.localStorage.getItem(TEXTS_KEY) || "{}") || {}) }); } catch {}
   }, []);
@@ -127,13 +134,16 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
 
   const due = useMemo(() => dueTexts({ quotes, invoices, leads }, texts), [quotes, invoices, leads, texts]);
 
+  const markContacted = (lead) => setLeads?.((ls) => ls.map((l) => (l.id === lead.id && l.status === "New" ? { ...l, status: "Contacted" } : l)));
   const markDone = (item) => {
+    if (item.kind === "lead") { markContacted(item.lead); setPending(null); return; }
     const patch = (rows) => rows.map((r) => (r.id === item.id ? { ...r, [item.mark.field]: item.mark.value } : r));
     if (item.kind === "invoice" || item.kind === "review") setInvoices(patch);
     else setQuotes(patch);
     setPending(null);
   };
   const open = (item) => {
+    if (item.kind === "lead") { setIntro(item.lead); return; }
     setPending(item.key);
     window.location.href = smsLink(item.phone, item.body);
   };
@@ -154,14 +164,14 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
         <button className="link-btn" style={{ marginLeft: "auto" }} onClick={() => setEditing(true)}><Pencil size={12} /> Edit wording</button>
       </div>
       <p className="calc-note" style={{ marginBottom: 10 }}>
-        Start dates for booked jobs (and if one moves), quote follow-ups ({FOLLOW_UP_DAYS} days after sending) and invoice chasers ({CHASE_DAYS} days after issuing). Tap to open the text in Messages from your own number, then check it and send.
+        New hipages leads (a first text, written for you to check and edit), start dates for booked jobs (and if one moves), quote follow-ups ({FOLLOW_UP_DAYS} days after sending) and invoice chasers ({CHASE_DAYS} days after issuing). Tap to open the text in Messages from your own number, then check it and send.
       </p>
       {(showAll ? due : due.slice(0, SHOW_FIRST)).map((item) => (
         <div key={item.key} className="text-row">
           <div className="upcoming-date">{item.badge}</div>
           <div className="text-main">
             <div className="upcoming-name">{item.who}</div>
-            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "review" ? "Review request" : item.kind === "job" ? "Booked job" : "Quote"} · {item.what}</div>
+            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "review" ? "Review request" : item.kind === "job" ? "Booked job" : item.kind === "lead" ? "New hipages lead" : "Quote"} · {item.what}</div>
             {pending === item.key ? (
               <div className="text-confirm">
                 Did you send it?
@@ -187,6 +197,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
         <button className="link-btn" style={{ marginTop: 10 }} onClick={() => setShowAll((v) => !v)}>{showAll ? "Show fewer" : `Show ${due.length - SHOW_FIRST} more`}</button>
       )}
       {emailing && <EmailModal kind={emailKind[emailing.kind]} id={emailing.id} title={`Email ${emailing.who}`} onClose={() => setEmailing(null)} />}
+      {intro && <IntroTextModal lead={intro} onClose={() => setIntro(null)} onSent={markContacted} />}
       {editing && <WordingModal texts={texts} onSave={(t) => { saveTexts(t); setEditing(false); }} onClose={() => setEditing(false)} />}
     </div>
   );
@@ -208,6 +219,16 @@ function WordingModal({ texts, onSave, onClose }) {
             <textarea rows={4} value={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.value })} />
           </label>
           <button className="link-btn" onClick={() => setForm({ ...form, followUp: DEFAULT_TEXTS.followUp })}>Reset this one</button>
+          <label className="field" style={{ marginTop: 12 }}>
+            <span>First text to a new hipages lead (blanks: {"{name}"}, {"{job}"})</span>
+            <textarea rows={8} value={form.intro} onChange={(e) => setForm({ ...form, intro: e.target.value })} />
+          </label>
+          <button className="link-btn" onClick={() => setForm({ ...form, intro: DEFAULT_TEXTS.intro })}>Reset this one</button>
+          <label className="field" style={{ marginTop: 12 }}>
+            <span>First text to any other new lead</span>
+            <textarea rows={8} value={form.introOther} onChange={(e) => setForm({ ...form, introOther: e.target.value })} />
+          </label>
+          <button className="link-btn" onClick={() => setForm({ ...form, introOther: DEFAULT_TEXTS.introOther })}>Reset this one</button>
           <label className="field" style={{ marginTop: 12 }}>
             <span>Start date (confirming a booked job)</span>
             <textarea rows={3} value={form.startConfirm} onChange={(e) => setForm({ ...form, startConfirm: e.target.value })} />

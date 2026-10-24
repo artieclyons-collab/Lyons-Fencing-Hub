@@ -171,3 +171,8 @@ When a client's text or email makes it clear they're going ahead ("yep happy to 
 
 ## Names filled in later
 A lead with no name yet ("N/A", "Enquiry 04…") gets its name when a later text or email from that number/address introduces them ("it's Chen", "this is Chen", "Chen here", signing off "Thanks, Chen") — `lib/leadName.js`. Their draft/sent quotes (and invoices made from them) still showing the placeholder are renamed too. A real name is never changed.
+
+## First text to a new lead
+A new hipages lead shows at the top of **Texts to send** (Board) with **Write intro text**, and any lead with status New and a phone number has an **Intro text** button in Leads. It opens a draft in your wording ("Hey Des, It's Artie from Lyons Fencing & Services. I saw your post on Hipages…"; `lib/introText.js`, `components/IntroTextModal.jsx`). The job is guessed from the lead (Colorbond / timber / plain "fence installation" when it can't tell) and is a drop-down, and the whole text is editable. **Open in Messages** opens it from your own number ready to send — it is never sent automatically — then asks "did you send it?" and only then marks the lead Contacted. Wording is editable under Texts to send → Edit wording (a separate version for non-hipages leads).
+
+Several quotes in one email: the PDF titles only name what differs — the length ("…Timber fencing 20.7m.pdf"), and the height only when the heights differ ("1.8m high").
