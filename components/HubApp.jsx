@@ -2501,6 +2501,43 @@ function GoogleSyncRunner() {
   return null;
 }
 
+// Pulls in new hipages leads while the hub is open: when you accept a lead, hipages emails the client's details to the business
+// Gmail, and the server reads those emails (read-only) and adds the client as a lead. Checks on opening, on coming back, and every few minutes.
+function HipagesRunner() {
+  useEffect(() => {
+    let off = false;
+    let enabled = false;
+    let busy = false;
+    const check = async () => {
+      if (off || !enabled || busy || document.hidden) return;
+      busy = true;
+      try {
+        const r = await fetch("/api/leads/hipages", { method: "POST" });
+        const b = await r.json().catch(() => ({}));
+        if (b.created > 0) window.dispatchEvent(new Event("hub-refresh"));
+      } catch {
+        // offline: next time
+      } finally {
+        busy = false;
+      }
+    };
+    fetch("/api/leads/hipages", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((b) => { enabled = !!b.configured; if (enabled) check(); })
+      .catch(() => {});
+    const every = setInterval(check, 180000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      off = true;
+      clearInterval(every);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
+  return null;
+}
+
 function GoogleSyncPanel() {
   const [status, setStatus] = useState(null); // { configured, connected, name, error, serviceAccount }
   const [busy, setBusy] = useState(false);
@@ -3746,6 +3783,7 @@ export default function HubApp() {
         </Modal>
       )}
       <GoogleSyncRunner />
+      <HipagesRunner />
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />}
     </div>

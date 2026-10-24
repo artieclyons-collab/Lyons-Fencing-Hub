@@ -157,3 +157,12 @@ On a quote, changing **Job length** or **Fence height** updates the rest of the 
 ## Several quotes or invoices in one email
 
 When more than one goes in the same email, the subject stays plain ("Lyons Fencing & Services Quotes") and each PDF's title says which it is: height, material and length for a quote ("Quote Brendan Robina Colorbond fence 1.8m Colorbond (26m).pdf"), type and number for an invoice. Two that would read identically get their document numbers added.
+
+## hipages leads (automatic)
+When you accept a hipages lead, hipages emails the client's details to the business Gmail. While the hub is open it reads those emails
+(`app/api/leads/hipages`, `lib/hipages.js`) and adds each client as a new lead — name, phone, email, suburb/postcode, job type and what they
+asked for (description, length, gate…) in the notes — with source "hipages". Only emails from hipages with "Job Details" in the subject are
+read; invitations ("New Job"), reminders and message notices are ignored. It uses the same `GMAIL_USER` / `GMAIL_APP_PASSWORD` as the quote
+emails, over read-only IMAP: nothing is marked read, moved, labelled or deleted. Someone already in Leads (same phone or email) isn't added
+again. Optional `supabase/migration-9-hipages.sql` lets it remember when it last looked; without it, it re-reads the last 3 days each time
+and skips anyone it already has. An outside timer can also call `POST /api/leads/hipages` with the `x-api-key` header.
