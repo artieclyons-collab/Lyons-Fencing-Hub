@@ -149,3 +149,11 @@ Colorbond runs are split into standard bays (2365mm rail, 3 sheets) plus, where 
 ## Dragging visits in the Visit planner
 
 Hold the grip on the left of a visit (the time block) and drag it **up or down** to change the order of that day — the times re-work themselves around the new order (a "You set the order for this day — Back to the best route" line lets you undo it; if the order would miss a locked time the best route is shown instead). While you drag, a bar of the next days appears at the top: **drop the visit on a day** to move it there (saved straight onto the lead and calendar, with an Undo). The **Move…** button still does the same with a list of days and how each would fit. The dragged order is a planner setting on that device; **Save this day's times** is what writes times onto the leads. Code: `components/useVisitDrag.js`, `forceOrder` in `lib/visitPlanner.js`.
+
+## Duplicating a quote and changing the size
+
+On a quote, changing **Job length** or **Fence height** updates the rest of the quote: per-metre lines that were at the old length move to the new one (a line whose quantity you set yourself is left alone and mentioned), the "longer or shorter than 26m" note follows, and a fence line swaps to the matching template for the new height (same style, raked, lapped, sleeper) with its wording and rate — unless you've changed that line's rate or added a lot of your own wording, in which case it's left and flagged. The sleeper note is added or removed with it. If the quote has a shopping list, a **Recalculate it** link redoes it for the new size. There's no 1.5m or raked 2.1m template, so those say so rather than guessing. Code: `lib/quoteAdjust.js`.
+
+## Several quotes or invoices in one email
+
+When more than one goes in the same email, the subject stays plain ("Lyons Fencing & Services Quotes") and each PDF's title says which it is: height, material and length for a quote ("Quote Brendan Robina Colorbond fence 1.8m Colorbond (26m).pdf"), type and number for an invoice. Two that would read identically get their document numbers added.

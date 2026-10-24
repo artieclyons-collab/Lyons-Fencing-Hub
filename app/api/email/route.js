@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { renderPdf } from "@/lib/pdf";
 import { buildFilename, money, itemsTotal, gstBreakdown } from "@/lib/logic";
-import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, sendEmail, isEmail } from "@/lib/email";
+import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, docLabels, sendEmail, isEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -99,7 +99,10 @@ async function handle(req) {
   const subject = String(body.subject ?? composed.subject).slice(0, 200).replace(/[\r\n]+/g, " ").trim() || composed.subject;
   const text = String(body.body ?? composed.text).slice(0, 4000);
   const mailer = getMailer();
-  const attachmentNames = spec.pdf ? recs.map((r) => `${buildFilename(spec.pdf, r)}.pdf`) : [];
+  // With several in one email, each file name says which it is (e.g. "Quote Brendan Robina Colorbond fence 1.8m Colorbond (26m).pdf").
+  const labels = recs.length > 1 ? docLabels(body.kind, recs) : [];
+  const fileName = (r, i) => `${buildFilename(spec.pdf, r)}${labels[i] ? ` ${labels[i]}` : ""}.pdf`.replace(/[\/:*?"<>|]/g, "");
+  const attachmentNames = spec.pdf ? recs.map((r, i) => fileName(r, i)) : [];
 
   if (body.preview) {
     // The same client's other documents that could go in the same email.
@@ -127,9 +130,9 @@ async function handle(req) {
   const attachments = [];
   try {
     if (spec.pdf) {
-      for (const r of recs) {
-        const { pdf, filename } = await renderPdf(spec.pdf, r);
-        attachments.push({ filename, content: pdf, contentType: "application/pdf" });
+      for (const [i, r] of recs.entries()) {
+        const { pdf } = await renderPdf(spec.pdf, r);
+        attachments.push({ filename: fileName(r, i), content: pdf, contentType: "application/pdf" });
       }
     }
     await sendEmail({ mailer, to, subject, text, attachments });

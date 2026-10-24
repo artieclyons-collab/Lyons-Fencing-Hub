@@ -41,6 +41,7 @@ import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
 import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, rescheduleHint, ownNotes } from "@/lib/availability";
 import { parseSiteNotes } from "@/lib/siteNotes";
+import { adjustForDimensions, materialsInputs } from "@/lib/quoteAdjust";
 import { parseReceipt } from "@/lib/receipt";
 import { extractAddress } from "@/lib/enquiry";
 import { readReceipt } from "@/lib/ocr";
@@ -95,44 +96,6 @@ function Field({ label, children }) {
 }
 
 // ---------- Dashboard ----------
-// A brand flourish for the board — a stylised paling-fence silhouette with a
-// low Gold Coast sun behind it. Pure inline SVG using the existing theme
-// colours, so no image assets or extra libraries to load.
-function FenceHero() {
-  const palings = Array.from({ length: 22 }, (_, i) => i);
-  return (
-    <svg
-      viewBox="0 0 700 84"
-      width="100%"
-      height="70"
-      preserveAspectRatio="none"
-      className="fence-hero"
-      aria-hidden="true"
-    >
-      <circle cx="580" cy="26" r="34" fill="var(--hivis)" opacity="0.16" />
-      <circle cx="580" cy="26" r="20" fill="var(--hivis)" opacity="0.22" />
-      <line x1="0" y1="68" x2="700" y2="68" stroke="var(--line)" strokeWidth="2" />
-      <line x1="4" y1="18" x2="696" y2="18" stroke="var(--timber)" strokeWidth="3" opacity="0.5" />
-      {palings.map((i) => {
-        const x = 4 + i * 32;
-        const h = i % 4 === 0 ? 58 : 48;
-        return (
-          <rect
-            key={i}
-            x={x}
-            y={68 - h}
-            width="20"
-            height={h}
-            rx="2"
-            fill="var(--timber)"
-            opacity={i % 2 === 0 ? 0.85 : 0.6}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
 const EVENT_KINDS = {
   job: { icon: Hammer, cls: "kind-job" },
   visit: { icon: MapPin, cls: "kind-visit" },
@@ -660,7 +623,6 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           {todayCount > 0 ? ` · ${todayCount} on today` : ""}
         </div>
       </div>
-      <FenceHero />
 
       <div className="card-grid">
         {cards.map((c) => (
@@ -1484,6 +1446,28 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   // Materials = whatever was added via "Calculate materials", plus fence templates' $/m x length (+ screws/nails for timber).
   const addedMaterials = Number(form.materialsCost) || 0;
   const templateMaterials = templateMaterialsCost(form.items, JOB_TEMPLATES, materials);
+
+  // ----- change the length or height and the rest of the quote follows (lines, wording, rates, notes) -----
+  const [adjusted, setAdjusted] = useState(null); // { changes, warnings, stale } shown under the fields
+  const lastDims = useRef({ len: Number(form.jobLength) || 0, h: Number(form.fenceHeight) || 0 }); // the last real values, in case the box is cleared mid-typing
+  const setDims = (patch) => {
+    const r = adjustForDimensions(form, { ...patch, oldLength: lastDims.current.len, oldHeight: lastDims.current.h });
+    if (patch.jobLength !== undefined && Number(patch.jobLength) > 0) lastDims.current.len = Number(patch.jobLength);
+    if (patch.fenceHeight !== undefined && Number(patch.fenceHeight) > 0) lastDims.current.h = Number(patch.fenceHeight);
+    setForm((cur) => ({ ...cur, ...patch, ...r.patch }));
+    if (r.changes.length || r.warnings.length) {
+      setAdjusted({ changes: r.changes, warnings: r.warnings, stale: (form.materialsBreakdown || []).length > 0 });
+    }
+  };
+  // The shopping list was worked out for the old size: redo it for the new one.
+  const recalcMaterials = () => {
+    const input = materialsInputs(form);
+    if (!input.style || !(Number(input.length) > 0)) return;
+    const items = calcMaterials({ ...input, gateWidth: 1, materials });
+    const total = itemsTotal(items);
+    setForm((cur) => ({ ...cur, materialsBreakdown: items, ...(templateMaterials <= 0 ? { materialsCost: total } : {}) }));
+    setAdjusted((a) => (a ? { ...a, stale: false, changes: [...a.changes, "shopping list recalculated"] } : a));
+  };
   const materialsCost = addedMaterials + templateMaterials;
   const runningCosts = fuelCost + labourCost + tipCost + materialsCost;
   // GST-inclusive, to compare like-for-like with the costs above (materials are entered inc GST too).
@@ -1596,9 +1580,16 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       {suburbError && <p className="calc-note" style={{ color: "var(--bad)" }}>{suburbError}</p>}
       <Field label="Suburb, state, postcode"><input value={form.suburb || ""} onChange={(e) => set("suburb", e.target.value)} placeholder="e.g. Palm Beach QLD 4221" /></Field>
       <div className="field-pair">
-        <Field label="Job length (m)"><input type="number" value={form.jobLength || ""} onChange={(e) => set("jobLength", e.target.value)} placeholder="e.g. 25" /></Field>
-        <Field label="Fence height (m)"><input type="number" step="0.1" value={form.fenceHeight || ""} onChange={(e) => set("fenceHeight", e.target.value)} placeholder="e.g. 1.8" /></Field>
+        <Field label="Job length (m)"><input type="number" value={form.jobLength || ""} onChange={(e) => setDims({ jobLength: e.target.value })} placeholder="e.g. 25" /></Field>
+        <Field label="Fence height (m)"><input type="number" step="0.1" value={form.fenceHeight || ""} onChange={(e) => setDims({ fenceHeight: e.target.value })} placeholder="e.g. 1.8" /></Field>
       </div>
+      {adjusted && (adjusted.changes.length > 0 || adjusted.warnings.length > 0) && (
+        <div className="draft-note-lite">
+          {adjusted.changes.length > 0 && <p className="calc-note" style={{ color: "var(--good)", margin: "0 0 4px" }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Updated for you: {adjusted.changes.join(" · ")}.</p>}
+          {adjusted.warnings.map((w) => <p key={w} className="calc-note" style={{ color: "var(--bad)", margin: "0 0 4px" }}>{w}</p>)}
+          {adjusted.stale && <p className="calc-note" style={{ margin: "0 0 4px" }}>The shopping list was worked out for the old size. <button type="button" className="link-btn" onClick={recalcMaterials}>Recalculate it</button></p>}
+        </div>
+      )}
       <Field label="Deposit (%)"><input type="number" value={form.depositPercent || ""} onChange={(e) => set("depositPercent", e.target.value)} style={{ maxWidth: 100 }} /></Field>
 
       <div className="panel duration-box">
