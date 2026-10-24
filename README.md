@@ -178,3 +178,6 @@ A new hipages lead shows at the top of **Texts to send** (Board) with **Write in
 Several quotes in one email: the PDF titles only name what differs — the length ("…Timber fencing 20.7m.pdf"), and the height only when the heights differ ("1.8m high").
 
 Email addresses with an obvious misspelled domain ("hohotmail.com", "gmial.com", ".con") are caught before sending: the Email window warns and the server refuses to send, naming the likely correct address (`suggestEmail` in `lib/email.js`).
+
+## Materials calculator and sleepers
+A "w/ sleeper 2m" fence is a 1.8m fence on a 200x50 treated pine sleeper. In the calculator (ticked automatically when the quote has a sleeper fence line, or tick "On a 200mm sleeper") it uses the 1.8m palings or sheets, posts cut for the full 2m (the next stocked size up: 2.7m hardwood, 2.7H C post), and adds one sleeper per bay (2.4m; 3.0m for a Colorbond long bay). Sizes are picked from what is priced in the Materials list, so a 2m or 2.1m fence no longer ends up with $0.00 lines. The "longer or shorter than ...m" sentence in a quote now follows the job length even when its number was already out of step.

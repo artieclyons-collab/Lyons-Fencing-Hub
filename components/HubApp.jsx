@@ -939,10 +939,11 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
 function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults }) {
   const [form, setForm] = useState({
     style: prefill?.style || quoteDefaults?.style || "timber",
-    timberStyle: prefill?.timberStyle || "butted",
+    timberStyle: prefill?.timberStyle || quoteDefaults?.timberStyle || "butted",
     length: prefill?.length_m ?? quoteDefaults?.length ?? "",
     height: prefill?.height_m ?? quoteDefaults?.height ?? "1.8",
     raked: !!quoteDefaults?.raked,
+    sleeper: !!quoteDefaults?.sleeper,
     gates: prefill?.gates ?? "0",
     gateWidth: "1",
     postSpacing: "",
@@ -983,6 +984,10 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           </select>
         </Field>
       )}
+      <label className="check-row">
+        <input type="checkbox" checked={!!form.sleeper} onChange={(e) => set("sleeper", e.target.checked)} />
+        <span>On a 200mm sleeper (the "w/ sleeper 2m" fence) — 1.8m of {form.style === "colorbond" ? "sheet" : "palings"} on a treated pine sleeper; adds the sleepers and longer posts</span>
+      </label>
       <div className="field-pair">
         <Field label="Height (m)"><input type="number" step="0.1" value={form.height} onChange={(e) => set("height", e.target.value)} /></Field>
         <Field label="Gates"><input type="number" value={form.gates} onChange={(e) => set("gates", e.target.value)} /></Field>
@@ -1748,6 +1753,8 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
             length: form.jobLength || undefined,
             height: form.fenceHeight || undefined,
             raked: (form.items || []).some((it) => /raked/i.test(it.tpl || "")),
+            sleeper: materialsInputs(form).sleeper,
+            timberStyle: materialsInputs(form).timberStyle,
           }}
           onClose={() => { setShowCalc(false); setScanPrefill(null); }}
           onApply={(total, items) => {
