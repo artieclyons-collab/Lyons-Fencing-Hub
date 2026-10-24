@@ -49,7 +49,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
     }
   };
 
-  const cannotSend = !info || !info.configured || !info.to;
+  const cannotSend = !info || !info.configured || !info.to || !!info.suggest;
   return (
     <div className="modal-overlay" onClick={state === "sending" ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -65,6 +65,9 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
             <>
               {!info.configured && (
                 <p className="calc-note" style={{ color: "var(--bad)" }}>Email isn't set up yet. Add the Gmail address and app password in Vercel (steps are in the README), then try again.</p>
+              )}
+              {info.suggest && (
+                <p className="calc-note" style={{ color: "var(--bad)" }}><AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> That address looks misspelled. Did you mean <strong>{info.suggest}</strong>? Fix it on the quote (or lead), save, and come back — it won't send as it is.</p>
               )}
               {!info.to && info.configured && (
                 <p className="calc-note" style={{ color: "var(--bad)" }}>There's no email address saved for {info.name || "this client"}. Add one (on the quote, invoice or lead) and save, then come back.</p>

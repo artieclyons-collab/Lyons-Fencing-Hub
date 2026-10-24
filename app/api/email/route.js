@@ -11,7 +11,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { renderPdf } from "@/lib/pdf";
 import { buildFilename, money, itemsTotal, gstBreakdown } from "@/lib/logic";
-import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, docLabels, sendEmail, isEmail } from "@/lib/email";
+import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, docLabels, sendEmail, isEmail, suggestEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -113,10 +113,12 @@ async function handle(req) {
           .filter((r) => !ids.includes(r.id) && norm(r.clientName) === client && eligible(r))
           .map((r) => ({ id: r.id, label: [r.docNumber, r.jobType, money(gstBreakdown(itemsTotal(r.items)).total)].filter(Boolean).join(" · ") }))
       : [];
-    return NextResponse.json({ ok: true, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachments: attachmentNames, others, ids, name: recs[0].clientName || "" }, NO_STORE);
+    return NextResponse.json({ ok: true, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachments: attachmentNames, others, ids, suggest: suggestEmail(to), name: recs[0].clientName || "" }, NO_STORE);
   }
 
   if (!mailer) return NextResponse.json({ error: "Email isn't set up yet — add GMAIL_USER and GMAIL_APP_PASSWORD." }, { status: 501 });
+  const typo = suggestEmail(to);
+  if (typo) return NextResponse.json({ error: `The address saved for this client (${to}) looks misspelled. Did you mean ${typo}? Fix it on the quote (or lead) and try again — nothing was sent.`, suggest: typo }, { status: 422 });
   if (!isEmail(to)) return NextResponse.json({ error: "There's no email address saved for this client. Add one and try again.", needsEmail: true }, { status: 422 });
   if (recs.some((r) => r.lastEmailed && Date.now() - Date.parse(r.lastEmailed) < COOLDOWN_SECONDS * 1000)) {
     return NextResponse.json({ error: "That was only just sent — wait a couple of minutes before sending it again." }, { status: 429 });
