@@ -13,7 +13,9 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isJobDetails, parseJobDetails } from "@/lib/hipages";
-import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead } from "@/lib/inboxLeads";
+import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody } from "@/lib/inboxLeads";
+import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
+import { renameClient } from "@/lib/leadName";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -131,6 +133,11 @@ export async function POST(req) {
 
     // A reply is only worth downloading if it's from someone who is already a lead; a first email from a stranger always is.
     const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()));
+    let quotesCache = null; // loaded only if an email sounds like an acceptance or a decline
+    const loadQuotes = async () => {
+      if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,status")).data || [];
+      return quotesCache;
+    };
     const created = [];
     const updated = [];
     let alreadyHave = 0;
@@ -153,15 +160,29 @@ export async function POST(req) {
       // A person's email.
       const lead = matchLead(leads, { address: e.address, text: e.text });
       if (lead) {
-        const change = applyClientMessage(lead, e.text, e.receivedAt);
-        if (!change) continue;
-        const patch = { ...change.patch };
+        // "Yep go ahead" / "we've gone with someone else": moves their one sent quote to Accepted / Declined.
+        let dec = null;
+        const fresh = cleanBody(e.text);
+        if (detectDecision(fresh)) {
+          dec = decideQuote({ lead, quotes: await loadQuotes(), text: fresh, via: "email", now: e.receivedAt });
+          if (dec && (dec.ambiguous || !(await saveDecision(supabaseAdmin, dec)))) dec = null;
+        }
+        const change = applyClientMessage(lead, e.text, e.receivedAt, { skipCancel: !!dec, display: e.display, address: e.address });
+        if (!change && !dec) continue;
+        const patch = { ...(change?.patch || {}) };
+        const applied = [...(change?.applied || [])];
+        if (dec) {
+          patch.status = dec.leadPatch.status;
+          patch.notes = [patch.notes ?? String(lead.notes || ""), dec.noteLine].filter((x) => String(x).trim()).join("\n").slice(-4000);
+          applied.push(`quote ${dec.decision === "accept" ? "accepted" : "declined"}`);
+        }
         if (!lead.email && e.address) patch.email = String(e.address).toLowerCase(); // learn their email while we're here
         const { error } = await supabaseAdmin.from("leads").update(patch).eq("id", lead.id);
         if (error) throw new Error(error.message);
+        if (patch.name) await renameClient(supabaseAdmin, lead, patch.name);
         Object.assign(lead, patch);
-        updated.push(`${lead.name} (${change.applied.join(", ")})`);
-        console.log(`inbox: lead updated from an email (${change.applied.join(", ")})`);
+        updated.push(`${lead.name} (${applied.join(", ")})`);
+        console.log(`inbox: lead updated from an email (${applied.join(", ")})`);
         continue;
       }
       if (isReply(e)) continue;

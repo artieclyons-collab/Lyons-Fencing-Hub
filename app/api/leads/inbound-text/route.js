@@ -9,6 +9,8 @@ import crypto from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseAvailability, parseNotesAvailability, withAvailability, detectCancellation } from "@/lib/availability";
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
+import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
+import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +49,7 @@ export async function POST(req) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,address,notes").order("inserted_at", { ascending: false });
+  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,email,address,notes").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // Names compare on letters and digits only, so emoji, spacing and punctuation ("Em ❤️" vs "Em") never get in the way.
   const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -97,6 +99,29 @@ export async function POST(req) {
   const applied = [];
   let notes = existing;
 
+  // A lead with no name yet ("N/A") whose text says who they are ("it's Chen") gets their name.
+  if (isPlaceholderName(lead.name)) {
+    const who = introducedName(text);
+    if (who) {
+      patch.name = who;
+      applied.push("name");
+      await renameClient(supabaseAdmin, lead, who);
+    }
+  }
+
+  // "Yep go ahead" / "we've gone with someone else": moves their one sent quote to Accepted / Declined (see lib/quoteDecision.js).
+  let decided = false;
+  if (detectDecision(text)) {
+    const { data: quoteRows } = await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,status");
+    const dec = decideQuote({ lead, quotes: quoteRows || [], text, via: "text" });
+    if (dec && !dec.ambiguous && (await saveDecision(supabaseAdmin, dec))) {
+      decided = true;
+      patch.status = dec.leadPatch.status;
+      notes = [notes.trim(), dec.noteLine].filter(Boolean).join("\n");
+      applied.push(`quote ${dec.decision === "accept" ? "accepted" : "declined"}`);
+    }
+  }
+
   const addr = extractAddress(text);
   if (addr) {
     const cur = String(lead.address || "").trim();
@@ -119,7 +144,7 @@ export async function POST(req) {
   }
 
   const mood = detectCancellation(text);
-  if ((mood.cancelled || mood.reschedule) && !existing.includes(clean)) {
+  if (!decided && (mood.cancelled || mood.reschedule) && !existing.includes(clean)) {
     notes = [notes.trim(), "Text " + stamp() + ": " + clean].filter(Boolean).join("\n");
     applied.push(mood.cancelled ? "possible cancellation" : "request to move the visit");
   }

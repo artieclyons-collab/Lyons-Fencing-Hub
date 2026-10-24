@@ -1766,7 +1766,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
       )}
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
-      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} />}
+      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} />}
     </Modal>
   );
 }
