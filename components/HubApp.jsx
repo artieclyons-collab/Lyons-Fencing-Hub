@@ -2501,9 +2501,9 @@ function GoogleSyncRunner() {
   return null;
 }
 
-// Pulls in new hipages leads while the hub is open: when you accept a lead, hipages emails the client's details to the business
-// Gmail, and the server reads those emails (read-only) and adds the client as a lead. Checks on opening, on coming back, and every few minutes.
-function HipagesRunner() {
+// Pulls in new leads from the business inbox while the hub is open: hipages job-details emails, and people emailing about a fence (see
+// app/api/leads/inbox). Read-only. Checks on opening, on coming back, and every few minutes.
+function InboxRunner() {
   useEffect(() => {
     let off = false;
     let enabled = false;
@@ -2512,16 +2512,16 @@ function HipagesRunner() {
       if (off || !enabled || busy || document.hidden) return;
       busy = true;
       try {
-        const r = await fetch("/api/leads/hipages", { method: "POST" });
+        const r = await fetch("/api/leads/inbox", { method: "POST" });
         const b = await r.json().catch(() => ({}));
-        if (b.created > 0) window.dispatchEvent(new Event("hub-refresh"));
+        if (b.created > 0 || b.updated > 0) window.dispatchEvent(new Event("hub-refresh"));
       } catch {
         // offline: next time
       } finally {
         busy = false;
       }
     };
-    fetch("/api/leads/hipages", { cache: "no-store" })
+    fetch("/api/leads/inbox", { cache: "no-store" })
       .then((r) => r.json())
       .then((b) => { enabled = !!b.configured; if (enabled) check(); })
       .catch(() => {});
@@ -3783,7 +3783,7 @@ export default function HubApp() {
         </Modal>
       )}
       <GoogleSyncRunner />
-      <HipagesRunner />
+      <InboxRunner />
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
       {settingsOpen && <SettingsModal settings={settings} onSave={(s) => { setSettings(s); setSettingsOpen(false); }} onClose={() => setSettingsOpen(false)} />}
     </div>
