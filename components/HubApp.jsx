@@ -874,7 +874,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
           if (ds.length === 1) return <span className="calc-note" style={{ display: "block", marginTop: 6 }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Quote preview: {ds[0].summary.join(" · ")} — tap Start quote to draft it.</span>;
           return (
             <span className="calc-note" style={{ display: "block", marginTop: 6 }}>
-              <Check size={12} style={{ verticalAlign: "-2px" }} /> {ds.length} separate quotes (one for each paragraph) — tap Start quote and they open one after another:
+              <Check size={12} style={{ verticalAlign: "-2px" }} /> {ds.length} separate quotes (each paragraph, and each “A or B” option, is its own quote) — tap Start quote and they open one after another:
               {ds.map((x, i) => <span key={i} style={{ display: "block", marginLeft: 16 }}>{x.title || `Quote ${i + 1}`}: {x.summary.join(" · ")}</span>)}
             </span>
           );
@@ -1696,6 +1696,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
           <div className="panel-head"><ClipboardPaste size={16} /><span>Drafted from your site notes</span></div>
           <p style={{ margin: "0 0 6px" }}>{form._draft.summary.join(" · ")}</p>
           {form._draft.needsPrice.map((t) => <p key={t} className="calc-note" style={{ color: "var(--bad)", margin: "2px 0" }}>{t}</p>)}
+          {(form._draft.remarks || []).length > 0 && <p className="calc-note" style={{ margin: "2px 0" }}>From your notes: {form._draft.remarks.join("; ")}. Add anything the client should see to the line wording or notes below.</p>}
           {form._draft.assumptions.length > 0 && (
             <ul className="draft-assume">
               {form._draft.assumptions.map((t) => <li key={t}>{t}</li>)}
