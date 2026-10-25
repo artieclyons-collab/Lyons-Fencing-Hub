@@ -37,12 +37,12 @@ import EmailModal from "./EmailModal";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
-import { quoteFromLead } from "@/lib/leadToQuote";
+import { quotesFromLead } from "@/lib/leadToQuote";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
 import { parseAvailability, parseDay, withAvailability, parseNotesAvailability, cancellationHint, rescheduleHint, ownNotes } from "@/lib/availability";
-import { parseSiteNotes } from "@/lib/siteNotes";
+import { parseSiteNotes, parseSiteJobs } from "@/lib/siteNotes";
 import { adjustForDimensions, materialsInputs } from "@/lib/quoteAdjust";
 import { parseReceipt } from "@/lib/receipt";
 import { extractAddress } from "@/lib/enquiry";
@@ -867,10 +867,17 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
       </div>
       <p className="calc-note" style={{ marginTop: -6 }}>A site visit goes straight into your iPhone calendar with reminders (see the calendar button at the top).</p>
       <Field label="Notes (site notes become the quote)">
-        <textarea rows={4} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder={"One job per line, e.g.\n26m 1.8 colorbond raked\nremove old fence\n1 gate\n(“Available from 3:30pm onwards.” is picked up by the visit planner)"} />
+        <textarea rows={4} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder={"One job per line, e.g.\n26m 1.8 colorbond raked\nremove old fence\n1 gate\n(For several quotes, leave a blank line between them and give each a heading, e.g. Left side.)\n(“Available from 3:30pm onwards.” is picked up by the visit planner)"} />
         {(() => {
-          const d = parseSiteNotes(ownNotes(form.notes), { jobType: form.jobType });
-          return d.items.length > 0 ? <span className="calc-note" style={{ display: "block", marginTop: 6 }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Quote preview: {d.summary.join(" · ")} — tap Start quote to draft it.</span> : null;
+          const ds = parseSiteJobs(ownNotes(form.notes), { jobType: form.jobType }).filter((x) => x.items.length > 0);
+          if (ds.length === 0) return null;
+          if (ds.length === 1) return <span className="calc-note" style={{ display: "block", marginTop: 6 }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Quote preview: {ds[0].summary.join(" · ")} — tap Start quote to draft it.</span>;
+          return (
+            <span className="calc-note" style={{ display: "block", marginTop: 6 }}>
+              <Check size={12} style={{ verticalAlign: "-2px" }} /> {ds.length} separate quotes (one for each paragraph) — tap Start quote and they open one after another:
+              {ds.map((x, i) => <span key={i} style={{ display: "block", marginLeft: 16 }}>{x.title || `Quote ${i + 1}`}: {x.summary.join(" · ")}</span>)}
+            </span>
+          );
         })()}
       </Field>
       <div className="calc-trigger-row" style={{ marginTop: -4 }}>
@@ -1075,6 +1082,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [queue, setQueue] = useState([]); // the rest of the quotes drafted from one lead's notes, opened one after another
   const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -1092,23 +1100,36 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
   useEffect(() => {
     if (pendingNewFrom) {
       // Name, phone, address (split into street and suburb), and job type all come across from the lead.
+      // (If the notes hold several quotes, they open one after another: saving or skipping one brings up the next.)
+      const [first, ...rest] = quotesFromLead(pendingNewFrom);
+      setQueue(rest);
       setModal({
         mode: "new",
-        data: { ...quoteFromLead(pendingNewFrom), docNumber: previewNumber() },
+        dupKey: Date.now(),
+        data: { ...first, docNumber: previewNumber() },
       });
       clearPending();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingNewFrom]);
 
+  // Opens the next quote waiting in the queue; the number it will take comes after the one being saved now.
+  const openNextInQueue = (afterSaving) => {
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    const n = (Number(settings?.nextDocNumber) || 458) + (afterSaving ? 1 : 0);
+    setModal({ mode: "new", dupKey: Date.now(), data: { ...next, docNumber: `LFS${n}` } });
+  };
+
   const save = (data) => {
-    const { _fromLeadId, _draft, ...row } = data;
+    const { _fromLeadId, _draft, _batch, ...row } = data;
     if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
     else {
       bumpDocNumber();
       setQuotes((qs) => [{ ...row, id: uid(), date: row.date || today() }, ...qs]);
       // A quote started from a lead means the site visit is done: the lead moves to Quoted (and leaves the Visit planner).
       if (_fromLeadId) setLeads((ls) => ls.map((l) => (l.id === _fromLeadId && ["New", "Contacted"].includes(l.status) ? { ...l, status: "Quoted" } : l)));
+      if (_batch && queue.length > 0) { openNextInQueue(true); return; }
     }
     setModal(null);
   };
@@ -1308,8 +1329,9 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
           wetDays={wetDays}
           settings={settings}
           materials={materials}
-          onClose={() => setModal(null)}
+          onClose={() => { setModal(null); setQueue([]); }}
           onSave={save}
+          onSkip={modal.data?._batch && queue.length > 0 ? () => openNextInQueue(false) : null}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onDuplicate={modal.data?.id ? duplicate : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
@@ -1365,7 +1387,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
+function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -1658,6 +1680,17 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
         )}
       </div>
 
+      {form._batch && (
+        <div className="panel draft-note">
+          <div className="panel-head"><ClipboardPaste size={16} /><span>Quote {form._batch.index} of {form._batch.total}: {form._batch.title}</span></div>
+          <p className="calc-note" style={{ margin: "0 0 6px" }}>
+            Your notes for {form.clientName || "this client"} hold {form._batch.total} separate quotes: {form._batch.titles.join(" · ")}.
+            {form._batch.index < form._batch.total ? " Saving this one opens the next." : " This is the last one."}
+          </p>
+          {onSkip && <button type="button" className="btn-ghost small" onClick={onSkip}>Skip this one</button>}
+          {form._batch.index > 1 && <span className="calc-note" style={{ marginLeft: 8 }}>Closing this window stops the rest.</span>}
+        </div>
+      )}
       {form._draft && (
         <div className="panel draft-note">
           <div className="panel-head"><ClipboardPaste size={16} /><span>Drafted from your site notes</span></div>
