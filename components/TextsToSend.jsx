@@ -7,6 +7,7 @@ import { Send, Copy, Check, Pencil, X, Phone, Mail } from "lucide-react";
 import EmailModal from "./EmailModal";
 import IntroTextModal from "./IntroTextModal";
 import { INTRO_TEXTS, introDraft, needsIntro, smsLink } from "@/lib/introText";
+import { hasQuote } from "@/lib/leadQuotes";
 import { money, today, itemsTotal, gstBreakdown, isDepositInvoice } from "@/lib/logic";
 import { isIsoDate } from "@/lib/jobSchedule";
 import { FOLLOW_UP_DAYS } from "@/lib/schedule";
@@ -106,7 +107,7 @@ export function dueTexts({ quotes, invoices, leads }, texts = DEFAULT_TEXTS) {
   }
   // New hipages leads waiting for a first message (a draft to check and send — see IntroTextModal).
   for (const l of leads) {
-    if (l.source !== "hipages" || !needsIntro(l)) continue;
+    if (l.source !== "hipages" || !needsIntro(l) || hasQuote(l, quotes)) continue;
     const age = daysAgo(l.createdAt) ?? 0;
     if (age > 14) continue;
     out.push({ key: `l:${l.id}`, kind: "lead", lead: l, id: l.id, email: "", age: 0, badge: "new", who: l.name || "New lead", what: `${l.jobType || "Fencing"}${l.address ? ` · ${l.address}` : ""}`, label: "Write intro text", phone: l.phone, body: introDraft(l, texts) });

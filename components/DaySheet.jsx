@@ -7,6 +7,7 @@ import { Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning
 import { addDaysIso } from "@/lib/schedule";
 import { hoursLabel } from "@/lib/jobSchedule";
 import { rainLevel, weatherIcon, RAIN_LABEL } from "@/lib/weather";
+import { hasQuote, quoteTag } from "@/lib/leadQuotes";
 
 const ICONS = { sun: Sun, partly: CloudSun, cloud: Cloud, fog: CloudFog, drizzle: CloudDrizzle, rain: CloudRain, storm: CloudLightning };
 const mapsTo = (address) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
@@ -109,7 +110,9 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
             <div className="vp-actions">
               {(l.address || e.location) && <a className="btn-ghost small" href={mapsTo(l.address || e.location)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>}
               {l.phone && <a className="btn-ghost small" href={`tel:${l.phone}`}><Phone size={13} /> Call</a>}
-              {l.id && ["New", "Contacted"].includes(l.status) && <button className="btn-ghost small" onClick={() => go("quotes", { newFromLead: l })}><FileText size={13} /> Start quote</button>}
+              {l.id && ["New", "Contacted"].includes(l.status) && (hasQuote(l, quotes)
+                ? <span className="calc-note" style={{ margin: 0 }}>{quoteTag(l, quotes)}</span>
+                : <button className="btn-ghost small" onClick={() => go("quotes", { newFromLead: l })}><FileText size={13} /> Start quote</button>)}
             </div>
           </div>
         </div>
