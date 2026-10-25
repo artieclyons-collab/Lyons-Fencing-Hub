@@ -18,7 +18,7 @@ import {
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, colorbondBays, templateMaterialsCost, estFuelCost,
+  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, colorbondBays, aluminiumLayout, templateMaterialsCost, estFuelCost,
   isDepositInvoice, DEPOSIT_DUE_NOTE,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
@@ -944,8 +944,10 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
     height: prefill?.height_m ?? quoteDefaults?.height ?? "1.8",
     raked: !!quoteDefaults?.raked,
     sleeper: !!quoteDefaults?.sleeper,
+    slatWidth: String(quoteDefaults?.slatWidth || 65),
+    gap: "10",
     gates: prefill?.gates ?? "0",
-    gateWidth: "1",
+    gateWidth: String(quoteDefaults?.gateWidth || "1"),
     postSpacing: "",
     panelWidth: "",
   });
@@ -966,6 +968,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           <select value={form.style} onChange={(e) => set("style", e.target.value)}>
             <option value="timber">Timber</option>
             <option value="colorbond">Colorbond</option>
+            <option value="aluminium">Aluminium slat</option>
           </select>
         </Field>
         <Field label="Length (m)"><input type="number" value={form.length} onChange={(e) => set("length", e.target.value)} placeholder="e.g. 24" /></Field>
@@ -984,16 +987,37 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           </select>
         </Field>
       )}
+      {form.style === "aluminium" && (() => {
+        const L = aluminiumLayout(form);
+        return (
+          <>
+            <div className="field-pair">
+              <Field label="Slat width">
+                <select value={form.slatWidth} onChange={(e) => set("slatWidth", e.target.value)}>
+                  <option value="65">65mm slats</option>
+                  <option value="90">90mm slats</option>
+                </select>
+              </Field>
+              <Field label="Gap between slats (mm)"><input type="number" value={form.gap} onChange={(e) => set("gap", e.target.value)} /></Field>
+            </div>
+            <p className="calc-note" style={{ color: "var(--good)" }}>
+              <Check size={12} style={{ verticalAlign: "-2px" }} /> {L.nSlats} slats a panel = {L.finished}mm high. {Number(form.length) > 0 ? `${L.panels} panel${L.panels === 1 ? "" : "s"} at ${L.centres.toFixed(2)}m post centres (${L.perLength} slat${L.perLength === 1 ? "" : "s"} from each 5800mm length). ` : ""}Slats, posts and covers come in 5800mm lengths that can't be cut in store, so offcuts are in the cost. Type a bay width below to change the post centres.
+            </p>
+          </>
+        );
+      })()}
+      {form.style !== "aluminium" && (
       <label className="check-row">
         <input type="checkbox" checked={!!form.sleeper} onChange={(e) => set("sleeper", e.target.checked)} />
         <span>On a 200mm sleeper (the "w/ sleeper 2m" fence) — 1.8m of {form.style === "colorbond" ? "sheet" : "palings"} on a treated pine sleeper; adds the sleepers and longer posts</span>
       </label>
+      )}
       <div className="field-pair">
         <Field label="Height (m)"><input type="number" step="0.1" value={form.height} onChange={(e) => set("height", e.target.value)} /></Field>
         <Field label="Gates"><input type="number" value={form.gates} onChange={(e) => set("gates", e.target.value)} /></Field>
       </div>
-      {form.style === "timber" && Number(form.gates) > 0 && (
-        <Field label="Gate width (m) — palings for each gate are added to its cost">
+      {(form.style === "timber" || form.style === "aluminium") && Number(form.gates) > 0 && (
+        <Field label={form.style === "aluminium" ? "Gate width (m) — 1.0m or less uses the 930 gate, wider the 1720 gate" : "Gate width (m) — palings for each gate are added to its cost"}>
           <input type="number" step="0.1" value={form.gateWidth} onChange={(e) => set("gateWidth", e.target.value)} style={{ maxWidth: 120 }} />
         </Field>
       )}
@@ -1476,7 +1500,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
   const recalcMaterials = () => {
     const input = materialsInputs(form);
     if (!input.style || !(Number(input.length) > 0)) return;
-    const items = calcMaterials({ ...input, gateWidth: 1, materials });
+    const items = calcMaterials({ ...input, gateWidth: input.gateWidth || 1, materials });
     const total = itemsTotal(items);
     setForm((cur) => ({ ...cur, materialsBreakdown: items, ...(templateMaterials <= 0 ? { materialsCost: total } : {}) }));
     setAdjusted((a) => (a ? { ...a, stale: false, changes: [...a.changes, "shopping list recalculated"] } : a));
@@ -1749,7 +1773,9 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onDelete, o
           materials={materials}
           prefill={scanPrefill}
           quoteDefaults={{
-            style: form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
+            style: form.jobType === "Aluminium fencing" ? "aluminium" : form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
+            slatWidth: materialsInputs(form).slatWidth,
+            gateWidth: materialsInputs(form).gateWidth,
             length: form.jobLength || undefined,
             height: form.fenceHeight || undefined,
             raked: (form.items || []).some((it) => /raked/i.test(it.tpl || "")),
