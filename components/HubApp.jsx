@@ -960,6 +960,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
     sleeper: !!quoteDefaults?.sleeper,
     slatWidth: String(quoteDefaults?.slatWidth || 65),
     gap: "10",
+    onWall: false,
     gates: prefill?.gates ?? "0",
     gateWidth: String(quoteDefaults?.gateWidth || "1"),
     postSpacing: "",
@@ -1014,6 +1015,10 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
               </Field>
               <Field label="Gap between slats (mm)"><input type="number" value={form.gap} onChange={(e) => set("gap", e.target.value)} /></Field>
             </div>
+            <label className="check-row">
+              <input type="checkbox" checked={!!form.onWall} onChange={(e) => set("onWall", e.target.checked)} />
+              <span>Posts fixed on top of a wall (base plates and anchors) instead of concreted into the ground</span>
+            </label>
             <p className="calc-note" style={{ color: "var(--good)" }}>
               <Check size={12} style={{ verticalAlign: "-2px" }} /> {L.nSlats} slats a panel = {L.finished}mm high. {Number(form.length) > 0 ? `${L.panels} panel${L.panels === 1 ? "" : "s"} at ${L.centres.toFixed(2)}m post centres (${L.perLength} slat${L.perLength === 1 ? "" : "s"} from each 5800mm length). ` : ""}Slats, posts and covers come in 5800mm lengths that can't be cut in store, so offcuts are in the cost. Type a bay width below to change the post centres.
             </p>
