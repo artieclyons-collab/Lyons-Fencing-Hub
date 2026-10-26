@@ -102,7 +102,6 @@ function Field({ label, children }) {
 const EVENT_KINDS = {
   job: { icon: Hammer, cls: "kind-job" },
   visit: { icon: MapPin, cls: "kind-visit" },
-  followup: { icon: Phone, cls: "kind-followup" },
   invoice: { icon: Receipt, cls: "kind-invoice" },
 };
 
@@ -342,7 +341,6 @@ function BoardCalendar({ events, onMove, go, weather = {} }) {
       <div className="cal-legend">
         <span><i className="cal-dot kind-job" /> Job</span>
         <span><i className="cal-dot kind-visit" /> Site visit</span>
-        <span><i className="cal-dot kind-followup" /> Follow-up</span>
         <span><i className="cal-dot kind-invoice" /> Invoice due</span>
       </div>
 
