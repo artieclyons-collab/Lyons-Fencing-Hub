@@ -1512,7 +1512,10 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 
   const fuelCost = estFuelCost(form.distanceKm, settings);
   const labourRate = (LABOUR_RATES.find((r) => r.id === form.labourRateType) || LABOUR_RATES[0]).rate;
-  const labourCost = (Number(form.employees) || 0) * (Number(form.hours) || 0) * labourRate;
+  // Labour is always in the costs: left blank it's one labourer for the estimated hours of the job; type 0 employees for "just me".
+  const employeesUsed = form.employees === "" || form.employees == null ? 1 : Number(form.employees) || 0;
+  const hoursUsed = Number(form.hours) > 0 ? Number(form.hours) : est.hours;
+  const labourCost = employeesUsed * hoursUsed * labourRate;
   const tipRatePerMetre = Number(settings?.tipRatePerMetre) || 10;
   const tipCost = (Number(form.removalLength) || 0) * tipRatePerMetre;
   // Materials = whatever was added via "Calculate materials", plus fence templates' $/m x length (+ screws/nails for timber).
@@ -1768,9 +1771,10 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
             : "Estimates a simple return trip from home (Tugun) to the job."}
         </p>
         <div className="field-pair">
-          <Field label="Employees"><input type="number" value={form.employees || ""} onChange={(e) => set("employees", e.target.value)} placeholder="0" /></Field>
-          <Field label="Hours on site"><input type="number" value={form.hours || ""} onChange={(e) => set("hours", e.target.value)} placeholder="e.g. 8" /></Field>
+          <Field label="Employees (labourer)"><input type="number" value={form.employees ?? ""} onChange={(e) => set("employees", e.target.value)} placeholder="1" /></Field>
+          <Field label="Hours on site"><input type="number" value={form.hours || ""} onChange={(e) => set("hours", e.target.value)} placeholder={`${est.hours} (estimated)`} /></Field>
         </div>
+        <p className="calc-note" style={{ marginTop: -4 }}>Labour is employees × hours × pay rate. Blank means 1 labourer at ${labourRate}/hr for the estimated {hoursLabel(est.hours)}; type 0 employees if it's just you.</p>
         <Field label="Employee pay rate">
           <select value={form.labourRateType || LABOUR_RATES[0].id} onChange={(e) => set("labourRateType", e.target.value)}>
             {LABOUR_RATES.map((r) => <option key={r.id} value={r.id}>${r.rate}/hr {r.label}</option>)}

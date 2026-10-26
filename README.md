@@ -204,3 +204,8 @@ Importing from texts and email is deliberately picky:
 Quote follow-ups are no longer calendar events (not on the Board calendar, Today/Tomorrow, the iPhone feed or the Google calendar): they are one-tap texts under "Texts to send" on the Board. The calendar shows jobs, site visits and invoice due dates.
 
 Invoice due dates are no longer calendar events either: the calendar (Board, Today/Tomorrow, iPhone, Google) shows only jobs and site visits. Tapping a job or visit on the Board calendar or in "Coming up" opens that quote or lead straight away (`go(tab, { open: { table, id } })`), and Today/Tomorrow has Open quote / Open lead buttons. The Board's overdue-invoice and old-quote rows open the record directly when there is just one.
+
+## Job time estimates and labour costs (from 26 Oct 2026)
+With a labourer on board, jobs are estimated at **25m a day** (demo + install), or **20m a day** when the fence is raked, on sleepers, or lapped & capped / good neighbour. It's worked out line by line (so a quote with a flat line and a raked line adds up properly), rounded up to the next half hour, with 0.5m of grace and never less than 2 hrs for the fence. **Gates take 1 hr each.** Aluminium slat fencing is still about 6m a day. A duration typed on the quote still wins. If the typed job length is shorter than a fence line on the quote, the longer one is used. (`lib/jobSchedule.js`)
+
+Every quote's costs now include labour: left blank, it's **1 labourer at $35/hr (cash) for the estimated hours**. Type employees and hours to override (0 employees for "just me"). The pay rate list is Labourer (cash) $35, Cash $40, ABN $50; quotes already saved with Cash or ABN keep those rates.
