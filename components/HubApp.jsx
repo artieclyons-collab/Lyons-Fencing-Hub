@@ -102,8 +102,10 @@ function Field({ label, children }) {
 const EVENT_KINDS = {
   job: { icon: Hammer, cls: "kind-job" },
   visit: { icon: MapPin, cls: "kind-visit" },
-  invoice: { icon: Receipt, cls: "kind-invoice" },
 };
+
+// Tapping a calendar entry opens the quote or lead it belongs to, not just the page it lives on.
+const openOf = (e) => (e.ref ? { open: { table: e.ref.table, id: e.ref.id } } : undefined);
 
 // "09:30" -> "9:30am"
 const fmtTime = (hhmm) => {
@@ -341,7 +343,6 @@ function BoardCalendar({ events, onMove, go, weather = {} }) {
       <div className="cal-legend">
         <span><i className="cal-dot kind-job" /> Job</span>
         <span><i className="cal-dot kind-visit" /> Site visit</span>
-        <span><i className="cal-dot kind-invoice" /> Invoice due</span>
       </div>
 
       <div className="day-label" style={{ marginTop: 14 }}>
@@ -366,7 +367,7 @@ function BoardCalendar({ events, onMove, go, weather = {} }) {
           const k = EVENT_KINDS[e.kind];
           return (
             <div key={e.uid} className={`event-card ${k.cls}`}>
-              <div className="event-row-plain" onClick={() => go(e.tab)}>
+              <div className="event-row-plain" onClick={() => go(e.tab, openOf(e))}>
                 <div className="event-icon"><k.icon size={16} /></div>
                 <div className="event-main">
                   <div className="event-title">{e.name}</div>
@@ -557,7 +558,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   };
   const attention = [];
   if (overdue.length > 0) {
-    attention.push({ key: "overdue", bad: true, icon: AlertTriangle, tab: "invoices",
+    attention.push({ key: "overdue", bad: true, icon: AlertTriangle, tab: "invoices", open: overdue.length === 1 ? { table: "invoices", id: overdue[0].id } : undefined,
       text: `${plural(overdue.length, "overdue invoice")} — ${whole(sum(overdue, (i) => inc(i.items)))} to chase`,
       sub: names(overdue, (i) => i.clientName) });
   }
@@ -584,7 +585,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       sub: names(acceptedNoDate, (q) => q.clientName) });
   }
   if (staleQuotes.length > 0) {
-    attention.push({ key: "stale", icon: FileText, tab: "quotes",
+    attention.push({ key: "stale", icon: FileText, tab: "quotes", open: staleQuotes.length === 1 ? { table: "quotes", id: staleQuotes[0].id } : undefined,
       text: `${plural(staleQuotes.length, "quote")} sent over a month ago with no answer`,
       sub: `Mark them Declined if they're dead — ${names(staleQuotes, (q) => q.clientName)}` });
   }
@@ -604,7 +605,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   const EventRow = ({ e, showDate }) => {
     const k = EVENT_KINDS[e.kind];
     return (
-      <div className={`event-row ${k.cls}`} onClick={() => go(e.tab)}>
+      <div className={`event-row ${k.cls}`} onClick={() => go(e.tab, openOf(e))}>
         <div className="event-icon"><k.icon size={16} /></div>
         <div className="event-main">
           <div className="event-title">{e.name}</div>
@@ -682,7 +683,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           <div className="all-clear"><Check size={16} /> All clear — nothing needs chasing right now.</div>
         ) : (
           attention.map((a) => (
-            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => (a.onClick ? a.onClick() : go(a.tab))}>
+            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => (a.onClick ? a.onClick() : go(a.tab, a.open ? { open: a.open } : undefined))}>
               <a.icon size={16} />
               <div className="attention-main">
                 <div>{a.text}</div>
@@ -754,9 +755,15 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 }
 
 // ---------- Leads ----------
-function Leads({ leads, quotes = [], setLeads, go }) {
+function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null); // {mode:'new'|'edit', data}
   const [introFor, setIntroFor] = useState(null); // the new lead whose first text is being written
+  useEffect(() => {
+    if (pendingOpen?.table !== "leads") return;
+    const l = leads.find((x) => x.id === pendingOpen.id);
+    if (l) { setModal({ mode: "edit", data: l }); clearOpen?.(); }
+    else if (leads.length > 0) clearOpen?.();
+  }, [pendingOpen, leads]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const visibleLeads = leads.filter((l) => (!statusFilter || l.status === statusFilter) && matchesQuery(leadText(l), query));
@@ -1076,13 +1083,19 @@ function useWetDates() {
   return wet;
 }
 
-function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, settings, materials, bumpDocNumber, go }) {
+function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, pendingOpen, clearOpen, settings, materials, bumpDocNumber, go }) {
   const wetDays = useWetDates();
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
   const [quickScanError, setQuickScanError] = useState("");
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [queue, setQueue] = useState([]); // the rest of the quotes drafted from one lead's notes, opened one after another
+  useEffect(() => {
+    if (pendingOpen?.table !== "quotes") return;
+    const q = quotes.find((x) => x.id === pendingOpen.id);
+    if (q) { setModal({ mode: "edit", data: q }); clearOpen?.(); }
+    else if (quotes.length > 0) clearOpen?.();
+  }, [pendingOpen, quotes]);
   const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -1847,8 +1860,14 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 }
 
 // ---------- Invoices ----------
-function Invoices({ invoices, setInvoices, settings, bumpDocNumber }) {
+function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
+  useEffect(() => {
+    if (pendingOpen?.table !== "invoices") return;
+    const i = invoices.find((x) => x.id === pendingOpen.id);
+    if (i) { setModal({ mode: "edit", data: i }); clearOpen?.(); }
+    else if (invoices.length > 0) clearOpen?.();
+  }, [pendingOpen, invoices]);
   const previewNumber = () => `LFS${settings?.nextDocNumber || 458}`;
 
   const save = (data) => {
@@ -3676,6 +3695,7 @@ const TABS = [
 export default function HubApp() {
   const [tab, setTab] = useState("dashboard");
   const [pendingNewFrom, setPendingNewFrom] = useState(null);
+  const [pendingOpen, setPendingOpen] = useState(null); // a quote, lead or invoice to open as soon as its page shows
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   // Tables whose last save failed (lib/storage.js reports each save); cleared as soon as a later save works.
@@ -3751,6 +3771,7 @@ export default function HubApp() {
   const go = (t, opts) => {
     setTab(t);
     if (opts?.newFromLead) setPendingNewFrom(opts.newFromLead);
+    if (opts?.open) setPendingOpen(opts.open);
   };
 
   const bumpDocNumber = () => setSettings((s) => ({ ...s, nextDocNumber: (Number(s.nextDocNumber) || 458) + 1 }));
@@ -3825,11 +3846,11 @@ export default function HubApp() {
         ) : (
           <>
             {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
-            {tab === "leads" && <Leads leads={leads} quotes={quotes} setLeads={setLeads} go={go} />}
+            {tab === "leads" && <Leads leads={leads} quotes={quotes} setLeads={setLeads} go={go} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
-            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} />}
+            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
+            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} />}

@@ -202,3 +202,5 @@ Importing from texts and email is deliberately picky:
 - **Automated emails** never become leads: senders like deploy@, support@, admin@ or a machine address, hipages' own system emails (including the "Tom has indicated they would like your help" confirmation, which comes from a hipages server), and anything with template wording ("Customer Support Team", "Like us on Facebook"). A real enquiry must also be written in the first person ("I", "we", "our", "can you…").
 
 Quote follow-ups are no longer calendar events (not on the Board calendar, Today/Tomorrow, the iPhone feed or the Google calendar): they are one-tap texts under "Texts to send" on the Board. The calendar shows jobs, site visits and invoice due dates.
+
+Invoice due dates are no longer calendar events either: the calendar (Board, Today/Tomorrow, iPhone, Google) shows only jobs and site visits. Tapping a job or visit on the Board calendar or in "Coming up" opens that quote or lead straight away (`go(tab, { open: { table, id } })`), and Today/Tomorrow has Open quote / Open lead buttons. The Board's overdue-invoice and old-quote rows open the record directly when there is just one.

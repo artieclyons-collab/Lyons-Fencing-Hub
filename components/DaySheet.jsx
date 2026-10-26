@@ -96,6 +96,7 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
             <div className="vp-actions">
               {(place(q) || e.location) && <a className="btn-ghost small" href={mapsTo(place(q) || e.location)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>}
               {q.clientPhone && <a className="btn-ghost small" href={`tel:${q.clientPhone}`}><Phone size={13} /> Call</a>}
+              {q.id && <button className="btn-ghost small" onClick={() => go("quotes", { open: { table: "quotes", id: q.id } })}><FileText size={13} /> Open quote</button>}
             </div>
           </div>
         </div>
@@ -110,6 +111,7 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
             <div className="vp-actions">
               {(l.address || e.location) && <a className="btn-ghost small" href={mapsTo(l.address || e.location)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>}
               {l.phone && <a className="btn-ghost small" href={`tel:${l.phone}`}><Phone size={13} /> Call</a>}
+              {l.id && <button className="btn-ghost small" onClick={() => go("leads", { open: { table: "leads", id: l.id } })}><FileText size={13} /> Open lead</button>}
               {l.id && ["New", "Contacted"].includes(l.status) && (hasQuote(l, quotes)
                 ? <span className="calc-note" style={{ margin: 0 }}>{quoteTag(l, quotes)}</span>
                 : <button className="btn-ghost small" onClick={() => go("quotes", { newFromLead: l })}><FileText size={13} /> Start quote</button>)}
