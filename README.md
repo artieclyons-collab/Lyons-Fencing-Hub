@@ -194,3 +194,9 @@ More on writing notes for several quotes (see "Several quotes from one lead's no
 
 ## Leads whose client already has a quote
 A lead can exist for a client who's already been quoted or booked in — typically a site visit to look at the job again before it starts (e.g. "Haydn (site visit)"). Those leads are matched to the client's quote by phone, email or name (a "(site visit)" or "?" on the name is ignored; `lib/leadQuotes.js`). While a non-declined quote exists, the lead no longer shows **Start quote**, **Intro text** or the Board's "new leads to contact" count, and instead says what the quote is ("Quote LFS485 accepted, starts 2 Nov"). Its site visit stays in the Visit planner as normal until its date passes or you mark the lead Won/Lost. The same name matching is used when a text or email says "yep go ahead".
+
+## What counts as a lead (and what doesn't)
+Importing from texts and email is deliberately picky:
+- **hipages leads** keep only what helps you quote: what they asked for in their own words, plus an extra answer only if it adds something (a gate they do want, a length when they gave no exact one). The "hipages lead" header, the category, "No" answers and answers that repeat the description are left out.
+- **Someone asking about work** (a labourer, apprentice or subbie: "I have experience…", "looking for work", "my previous boss", "willing to learn") is not a customer, so a text or email like that never becomes a lead.
+- **Automated emails** never become leads: senders like deploy@, support@, admin@ or a machine address, hipages' own system emails (including the "Tom has indicated they would like your help" confirmation, which comes from a hipages server), and anything with template wording ("Customer Support Team", "Like us on Facebook"). A real enquiry must also be written in the first person ("I", "we", "our", "can you…").
