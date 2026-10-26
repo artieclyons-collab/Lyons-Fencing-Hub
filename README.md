@@ -211,3 +211,5 @@ With a labourer on board, jobs are estimated at **25m a day** (demo + install), 
 Every quote's costs now include labour: left blank, it's **1 labourer at $35/hr (cash) for the estimated hours**. Type employees and hours to override (0 employees for "just me"). The pay rate list is Labourer (cash) $35, Cash $40, ABN $50; quotes already saved with Cash or ABN keep those rates.
 
 Aluminium on a wall: the calculator has "Posts fixed on top of a wall (base plates and anchors)" for toppers (posts cut to panel height, a base plate and four M8x70 anchors each, no concrete), and there is a template "Aluminium slat panels 550mm high on a wall (90mm slats)" at $325/m (a 5-row panel, 20mm gaps, about 550mm with the extra inch at the top). A topper job is estimated at about 18m a day, not the 6m a day of full-height aluminium.
+
+Quotes and Invoices can be sorted: newest first (the default), oldest first, client A-Z, client Z-A, or highest value. The choice is remembered on that device, and it works together with the search box and status filter.

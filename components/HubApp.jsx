@@ -253,6 +253,41 @@ function SearchBar({ value, onChange, placeholder, shown, total, children }) {
   );
 }
 
+// How a list is ordered: newest first (how they arrive), oldest first, by client A–Z or Z–A, or by value. The choice is remembered on this device.
+const SORTS = [["newest", "Newest first"], ["oldest", "Oldest first"], ["az", "A–Z (client)"], ["za", "Z–A (client)"], ["value", "Highest value"]];
+function useSortMode(key) {
+  const [mode, setMode] = useState("newest");
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(`lyons:sort:${key}`);
+      if (v && SORTS.some(([id]) => id === v)) setMode(v);
+    } catch { /* storage blocked: the default stands */ }
+  }, [key]);
+  const choose = (v) => {
+    setMode(v);
+    try { window.localStorage.setItem(`lyons:sort:${key}`, v); } catch { /* not remembered */ }
+  };
+  return [mode, choose];
+}
+function SortSelect({ mode, onChange }) {
+  return (
+    <select className="search-filter" value={mode} onChange={(e) => onChange(e.target.value)} aria-label="Sort order">
+      {SORTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+    </select>
+  );
+}
+const nameKey = (n) => String(n || "").replace(/[^\p{L}\p{N} ]/gu, "").trim().toLowerCase();
+function sortRows(rows, mode, nameOf, valueOf) {
+  if (mode === "oldest") return [...rows].reverse();
+  if (mode === "az" || mode === "za") {
+    const dir = mode === "az" ? 1 : -1;
+    // A–Z by client; the same client's documents stay newest first
+    return rows.map((r, i) => [r, i]).sort((a, b) => dir * nameKey(nameOf(a[0])).localeCompare(nameKey(nameOf(b[0])), "en", { numeric: true }) || a[1] - b[1]).map(([r]) => r);
+  }
+  if (mode === "value") return rows.map((r, i) => [r, i]).sort((a, b) => valueOf(b[0]) - valueOf(a[0]) || a[1] - b[1]).map(([r]) => r);
+  return rows;
+}
+
 function BoardCalendar({ events, onMove, go, weather = {} }) {
   const t = today();
   const [month, setMonth] = useState(t.slice(0, 7));
@@ -1104,7 +1139,8 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
   const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const visibleQuotes = quotes.filter((q) => (!statusFilter || q.status === statusFilter) && matchesQuery(quoteText(q), query));
+  const [sortMode, setSortMode] = useSortMode("quotes");
+  const visibleQuotes = sortRows(quotes.filter((q) => (!statusFilter || q.status === statusFilter) && matchesQuery(quoteText(q), query)), sortMode, (q) => q.clientName, (q) => gstBreakdown(itemsTotal(q.items)).total);
   const quickFileInputRef = useRef(null);
   const previewNumber = () => `LFS${settings?.nextDocNumber || 458}`;
 
@@ -1316,6 +1352,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
 
       {quotes.length > 0 && (
         <SearchBar value={query} onChange={setQuery} placeholder="Search quotes — name, number, address, amount, notes…" shown={visibleQuotes.length} total={quotes.length}>
+          <SortSelect mode={sortMode} onChange={setSortMode} />
           <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
             <option value="">All statuses</option>
             {QUOTE_STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -1894,7 +1931,8 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // The Overdue filter matches what the list shows (an unpaid invoice past its due date), not just the stored status.
-  const visibleInvoices = invoices.filter((i) => (!statusFilter || effectiveStatus(i) === statusFilter) && matchesQuery(invoiceText(i), query));
+  const [sortMode, setSortMode] = useSortMode("invoices");
+  const visibleInvoices = sortRows(invoices.filter((i) => (!statusFilter || effectiveStatus(i) === statusFilter) && matchesQuery(invoiceText(i), query)), sortMode, (i) => i.clientName, (i) => gstBreakdown(itemsTotal(i.items)).total);
 
   return (
     <div>
@@ -1910,6 +1948,7 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
 
       {invoices.length > 0 && (
         <SearchBar value={query} onChange={setQuery} placeholder="Search invoices — name, number, address, amount…" shown={visibleInvoices.length} total={invoices.length}>
+          <SortSelect mode={sortMode} onChange={setSortMode} />
           <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
             <option value="">All statuses</option>
             {INVOICE_STATUSES.map((s) => <option key={s}>{s}</option>)}
