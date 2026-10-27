@@ -996,6 +996,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
     slatWidth: String(quoteDefaults?.slatWidth || 65),
     gap: "10",
     onWall: false,
+    holeDepth: String(quoteDefaults?.holeDepth || 600),
     gates: prefill?.gates ?? "0",
     gateWidth: String(quoteDefaults?.gateWidth || "1"),
     postSpacing: "",
@@ -1074,6 +1075,18 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
         <Field label={form.style === "aluminium" ? "Gate width (m) — 1.0m or less uses the 930 gate, wider the 1720 gate" : "Gate width (m) — palings for each gate are added to its cost"}>
           <input type="number" step="0.1" value={form.gateWidth} onChange={(e) => set("gateWidth", e.target.value)} style={{ maxWidth: 120 }} />
         </Field>
+      )}
+      {form.style !== "aluminium" && (
+        <>
+          <Field label="Hole depth (mm)">
+            <input type="number" step="100" value={form.holeDepth} onChange={(e) => set("holeDepth", e.target.value)} style={{ maxWidth: 140 }} />
+          </Field>
+          {Number(form.holeDepth) > 600 && (
+            <p className="calc-note" style={{ color: "var(--good)" }}>
+              <Check size={12} style={{ verticalAlign: "-2px" }} /> {form.holeDepth}mm deep holes: posts {form.style === "colorbond" ? "(C posts) " : ""}go as deep as the holes, and each hole takes {Math.max(2, Math.round(Number(form.holeDepth) / 300))} bags of concrete.
+            </p>
+          )}
+        </>
       )}
       <div className="field-pair">
         <Field label="Bay width (m)"><input type="number" step="0.01" value={form.panelWidth} onChange={(e) => set("panelWidth", e.target.value)} placeholder={form.style === "colorbond" ? "2.365" : "2.4"} /></Field>
@@ -1869,6 +1882,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
             style: form.jobType === "Aluminium fencing" ? "aluminium" : form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
             slatWidth: materialsInputs(form).slatWidth,
             gateWidth: materialsInputs(form).gateWidth,
+            holeDepth: materialsInputs(form).holeDepth,
             length: form.jobLength || undefined,
             height: form.fenceHeight || undefined,
             raked: (form.items || []).some((it) => /raked/i.test(it.tpl || "")),

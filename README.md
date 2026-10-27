@@ -215,3 +215,5 @@ Aluminium on a wall: the calculator has "Posts fixed on top of a wall (base plat
 Quotes and Invoices can be sorted: newest first (the default), oldest first, client A-Z, client Z-A, or highest value. The choice is remembered on that device, and it works together with the search box and status filter.
 
 Materials calculator (timber): palings are counted per metre, not per bay: 10 a metre butted, 13 a metre lapped & capped (good neighbour) — `PALINGS_PER_METRE` in `lib/logic.js`. Gate palings use the same rate.
+
+Hole depth in the materials calculator (timber and Colorbond): holes are 600mm deep unless the quote says otherwise. If a line or the notes say e.g. "900mm deep concrete footings due to the sand" (the deepest "NNNmm deep" counts), the calculator picks posts as deep as the holes (900mm = 2.7H C posts or 2.7m hardwood on a 1.8m fence) and 3 bags of concrete per hole (2 at 600mm, 3 at 900mm, 4 at 1200mm). The depth shows in the calculator and can be typed over. Post sizes the Materials list does not have (e.g. 3.0H) come out at $0.00 so you can see them.
