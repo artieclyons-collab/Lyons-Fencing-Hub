@@ -213,3 +213,5 @@ Every quote's costs now include labour: left blank, it's **1 labourer at $35/hr 
 Aluminium on a wall: the calculator has "Posts fixed on top of a wall (base plates and anchors)" for toppers (posts cut to panel height, a base plate and four M8x70 anchors each, no concrete), and there is a template "Aluminium slat panels 550mm high on a wall (90mm slats)" at $325/m (a 5-row panel, 20mm gaps, about 550mm with the extra inch at the top). A topper job is estimated at about 18m a day, not the 6m a day of full-height aluminium.
 
 Quotes and Invoices can be sorted: newest first (the default), oldest first, client A-Z, client Z-A, or highest value. The choice is remembered on that device, and it works together with the search box and status filter.
+
+Materials calculator (timber): palings are counted per metre, not per bay: 10 a metre butted, 13 a metre lapped & capped (good neighbour) — `PALINGS_PER_METRE` in `lib/logic.js`. Gate palings use the same rate.
