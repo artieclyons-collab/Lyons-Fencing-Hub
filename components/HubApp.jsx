@@ -1083,7 +1083,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
             </div>
             <label className="check-row">
               <input type="checkbox" checked={!!form.onWall} onChange={(e) => set("onWall", e.target.checked)} />
-              <span>Posts fixed on top of a wall (base plates and anchors) instead of concreted into the ground</span>
+              <span>Posts fixed on top of a wall (base plates screwed down) instead of concreted into the ground. Just slats, posts and base plates, to match existing panels.</span>
             </label>
             <p className="calc-note" style={{ color: "var(--good)" }}>
               <Check size={12} style={{ verticalAlign: "-2px" }} /> {L.nSlats} slats a panel = {L.finished}mm high. {Number(form.length) > 0 ? `${L.panels} panel${L.panels === 1 ? "" : "s"} at ${L.centres.toFixed(2)}m post centres (${L.perLength} slat${L.perLength === 1 ? "" : "s"} from each 5800mm length). ` : ""}Slats, posts and covers come in 5800mm lengths that can't be cut in store, so offcuts are in the cost. Type a bay width below to change the post centres.
@@ -1093,7 +1093,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
       })()}
       {form.style !== "aluminium" && (
       <label className="check-row">
-        <input type="checkbox" checked={!!form.sleeper} onChange={(e) => set("sleeper", e.target.checked)} />
+        <input type="checkbox" checked={!!form.sleeper} onChange={(e) => { set("sleeper", e.target.checked); if (e.target.checked && String(form.holeDepth) === "600") set("holeDepth", "700"); else if (!e.target.checked && String(form.holeDepth) === "700") set("holeDepth", "600"); }} />
         <span>On a 200mm sleeper (the "w/ sleeper 2m" fence) — 1.8m of {form.style === "colorbond" ? "sheet" : "palings"} on a treated pine sleeper; adds the sleepers and longer posts</span>
       </label>
       )}
@@ -1113,7 +1113,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           </Field>
           {Number(form.holeDepth) > 600 && (
             <p className="calc-note" style={{ color: "var(--good)" }}>
-              <Check size={12} style={{ verticalAlign: "-2px" }} /> {form.holeDepth}mm deep holes: posts {form.style === "colorbond" ? "(C posts) " : ""}go as deep as the holes, and each hole takes {Math.max(2, Math.round(Number(form.holeDepth) / 300))} bags of concrete.
+              <Check size={12} style={{ verticalAlign: "-2px" }} /> {form.holeDepth}mm deep holes: posts {form.style === "colorbond" ? "(C posts) " : ""}go as deep as the holes, and each hole takes {Math.round(Math.max(2, Number(form.holeDepth) / 300) * 100) / 100} bags of concrete.
             </p>
           )}
         </>
