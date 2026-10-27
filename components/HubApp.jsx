@@ -39,6 +39,7 @@ import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
 import { quotesFromLead } from "@/lib/leadToQuote";
+import { sectionsFromQuote, calcFromQuote } from "@/lib/quoteMaterials";
 import { collectVisits, collectJobDays, HOME, WORK_START } from "@/lib/visitData";
 import { buildNodes, runPlan } from "@/lib/visitRun";
 import { PLACES, fmtClock, fmtHHMM, parseTime, TRAFFIC_FACTOR } from "@/lib/visitPlanner";
@@ -985,7 +986,7 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
   );
 }
 
-function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults }) {
+function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults, quoteSections = [] }) {
   const [form, setForm] = useState({
     style: prefill?.style || quoteDefaults?.style || "timber",
     timberStyle: prefill?.timberStyle || quoteDefaults?.timberStyle || "butted",
@@ -1003,8 +1004,24 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
     panelWidth: "",
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const preview = useMemo(() => calcMaterials({ ...form, materials }), [form, materials]);
+  // By default the materials are worked out from the quote's own lines, section by section; "work it out by hand" gives the old form.
+  const [auto, setAuto] = useState(quoteSections.length > 0 && !prefill);
+  const [extras, setExtras] = useState([]); // things the quote can't tell it (a bay with taller sheets, say); a negative quantity takes some off
+  const [extraPick, setExtraPick] = useState("");
+  const [extraQty, setExtraQty] = useState("1");
+  const fromQuote = useMemo(() => (auto ? calcFromQuote(quoteSections, materials) : null), [auto, quoteSections, materials]);
+  const base = useMemo(() => (auto ? fromQuote.items : calcMaterials({ ...form, materials })), [auto, fromQuote, form, materials]);
+  const preview = useMemo(() => [...base, ...extras], [base, extras]);
   const total = itemsTotal(preview);
+  const addExtra = () => {
+    const m = materials.find((x) => x.id === extraPick);
+    const qty = Number(extraQty);
+    if (!m || !qty) return;
+    const rate = Number(m.costPerUnit || 0) / (Number(m.packQty) || 1);
+    setExtras((x) => [...x, { id: uid(), desc: `${m.name}${qty < 0 ? " (take off)" : " (extra)"}`, qty, rate }]);
+    setExtraPick("");
+    setExtraQty("1");
+  };
 
   return (
     <Modal title="Calculate materials" onClose={onClose}>
@@ -1014,6 +1031,19 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           {prefill.notes ? ` ${prefill.notes}` : ""}
         </div>
       )}
+      {auto && (
+        <div className="calc-preview" style={{ marginBottom: 10 }}>
+          <p className="calc-note" style={{ marginTop: 0 }}>Worked out from the lines on this quote, one section for each fence line. Check what it read:</p>
+          {fromQuote.sections.map((s, i) => (
+            <div key={i} className="calc-row"><span>{s.label}</span><span>{money(s.total)}</span></div>
+          ))}
+          <button type="button" className="link-btn" onClick={() => setAuto(false)}>Work it out by hand instead</button>
+        </div>
+      )}
+      {!auto && quoteSections.length > 0 && (
+        <button type="button" className="link-btn" style={{ marginBottom: 8 }} onClick={() => setAuto(true)}>Use the quote's own lines instead</button>
+      )}
+      {!auto && (<>
       <div className="field-pair">
         <Field label="Fence style">
           <select value={form.style} onChange={(e) => set("style", e.target.value)}>
@@ -1101,6 +1131,7 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
           </p>
         );
       })()}
+      </>)}
       <p className="calc-note">Costs are pulled from your Materials list where the name matches — anything showing $0.00 either isn't priced yet or the name didn't match closely enough (adjust it in Materials).</p>
 
       {preview.length > 0 && (
@@ -1112,8 +1143,23 @@ function MaterialCalcModal({ onClose, onApply, materials, prefill, quoteDefaults
         </div>
       )}
 
+      <div style={{ marginTop: 10 }}>
+        <p className="calc-note" style={{ marginBottom: 6 }}>Add or take off something the quote can't tell me (e.g. a bay that needs 2 × 2.1H sheets: add 2 of the 2.1H sheet, and take off 2 of the 1.8H):</p>
+        {extras.map((x) => (
+          <div key={x.id} className="calc-row"><span>{x.desc} × {x.qty}</span><span>{money(x.qty * x.rate)} <button type="button" className="icon-btn" onClick={() => setExtras((l) => l.filter((y) => y.id !== x.id))} aria-label="Remove"><X size={13} /></button></span></div>
+        ))}
+        <div className="calc-trigger-row">
+          <select value={extraPick} onChange={(e) => setExtraPick(e.target.value)} style={{ flex: 1 }}>
+            <option value="">Pick from your Materials…</option>
+            {[...materials].sort((a, b) => String(a.name).localeCompare(String(b.name))).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <input type="number" value={extraQty} onChange={(e) => setExtraQty(e.target.value)} style={{ width: 70 }} aria-label="Quantity" />
+          <button type="button" className="btn-ghost small" onClick={addExtra} disabled={!extraPick || !Number(extraQty)}><Plus size={13} /> Add</button>
+        </div>
+      </div>
+
       <div className="modal-actions">
-        <button className="btn-primary" disabled={!form.length} onClick={() => onApply(total, preview)}>
+        <button className="btn-primary" disabled={auto ? preview.length === 0 : !form.length} onClick={() => onApply(total, preview)}>
           <Plus size={15} /> Add to your costs
         </button>
       </div>
@@ -1591,9 +1637,14 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
   };
   // The shopping list was worked out for the old size: redo it for the new one.
   const recalcMaterials = () => {
-    const input = materialsInputs(form);
-    if (!input.style || !(Number(input.length) > 0)) return;
-    const items = calcMaterials({ ...input, gateWidth: input.gateWidth || 1, materials });
+    const sections = sectionsFromQuote(form);
+    let items;
+    if (sections.length) items = calcFromQuote(sections, materials).items;
+    else {
+      const input = materialsInputs(form);
+      if (!input.style || !(Number(input.length) > 0)) return;
+      items = calcMaterials({ ...input, gateWidth: input.gateWidth || 1, materials });
+    }
     const total = itemsTotal(items);
     setForm((cur) => ({ ...cur, materialsBreakdown: items, ...(templateMaterials <= 0 ? { materialsCost: total } : {}) }));
     setAdjusted((a) => (a ? { ...a, stale: false, changes: [...a.changes, "shopping list recalculated"] } : a));
@@ -1878,6 +1929,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         <MaterialCalcModal
           materials={materials}
           prefill={scanPrefill}
+          quoteSections={sectionsFromQuote(form)}
           quoteDefaults={{
             style: form.jobType === "Aluminium fencing" ? "aluminium" : form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
             slatWidth: materialsInputs(form).slatWidth,
