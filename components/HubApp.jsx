@@ -2046,13 +2046,14 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
           onSave={save}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onMarkPaid={modal.data?.id && modal.data.status !== "Paid" ? () => { markPaid(modal.data); setModal(null); } : null}
+          onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
         />
       )}
     </div>
   );
 }
 
-function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
+function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist }) {
   const [showEmail, setShowEmail] = useState(false);
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
@@ -2061,6 +2062,14 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setItems = (updater) => setForm((f) => ({ ...f, items: typeof updater === "function" ? updater(f.items) : updater }));
   const addNote = (snippet) => set("notes", form.notes ? `${form.notes}\n${snippet}` : snippet);
+  // The email is built from the saved invoice, so whatever's been changed on this screen is saved first.
+  const openEmail = async () => {
+    try {
+      await fetch("/api/data/invoices", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: [form] }) });
+      onPersist?.(form);
+    } catch { /* the email screen will show what's saved */ }
+    setShowEmail(true);
+  };
 
   const handleFindSuburb = async () => {
     if (!form.address) return;
@@ -2117,7 +2126,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid }) {
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {onMarkPaid && <button className="btn-ghost" onClick={onMarkPaid}><Check size={15} /> Mark paid</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
-        {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved invoice with the PDF attached"><Mail size={15} /> Email invoice</button>}
+        {initial?.id && <button className="btn-ghost" onClick={openEmail} title="Saves your changes, then emails the invoice with the PDF attached"><Mail size={15} /> Email invoice</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
 

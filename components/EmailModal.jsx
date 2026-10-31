@@ -2,7 +2,8 @@
 // "Email this" — shows who the email goes to and the wording (editable), then sends it from the business Gmail account.
 // The address always comes from the saved quote/invoice/lead (the server decides), so a typo here can't misdirect it.
 import { useState, useEffect } from "react";
-import { Send, Check, X, Paperclip, AlertTriangle } from "lucide-react";
+import { Send, Check, X, Paperclip, AlertTriangle, Pencil, Plus } from "lucide-react";
+import { itemsTotal, gstBreakdown, money, uid } from "@/lib/logic";
 
 async function api(body) {
   const res = await fetch("/api/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -19,6 +20,30 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
   const [message, setMessage] = useState("");
   const [result, setResult] = useState(null);
   const [extra, setExtra] = useState([]); // other documents for the same client going in the same email
+  const isInvoice = kind === "invoice" || kind === "chase";
+  const [adj, setAdj] = useState(null); // the invoice being adjusted before it's sent
+  const [adjBusy, setAdjBusy] = useState(false);
+  const [reload, setReload] = useState(0); // bumps after the invoice is saved so the email is rebuilt from it
+  const openAdjust = async () => {
+    setAdjBusy(true);
+    try {
+      const rows = await fetch("/api/data/invoices", { cache: "no-store" }).then((r) => r.json()).then((j) => j.rows || []);
+      const inv = rows.find((r) => r.id === id);
+      if (inv) setAdj({ ...inv, items: (inv.items || []).map((it) => ({ ...it, id: it.id || uid() })) });
+    } finally { setAdjBusy(false); }
+  };
+  const saveAdjust = async () => {
+    setAdjBusy(true);
+    try {
+      const res = await fetch("/api/data/invoices", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: [adj] }) });
+      if (!res.ok) throw new Error("save failed");
+      setAdj(null);
+      setReload((n) => n + 1);
+      window.dispatchEvent(new Event("hub-refresh"));
+    } catch { setMessage("Couldn't save the changes to the invoice — nothing was changed."); }
+    finally { setAdjBusy(false); }
+  };
+  const setLine = (lid, k, v) => setAdj((a) => ({ ...a, items: a.items.map((it) => (it.id === lid ? { ...it, [k]: v } : it)) }));
 
   useEffect(() => {
     let off = false;
@@ -31,7 +56,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
       setState("ready");
     }).catch(() => { if (!off) { setMessage("Couldn't reach the hub."); setState("error"); } });
     return () => { off = true; };
-  }, [kind, id, extra.join(",")]);
+  }, [kind, id, extra.join(","), reload]);
 
   const send = async () => {
     setState("sending");
@@ -49,7 +74,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
     }
   };
 
-  const cannotSend = !info || !info.configured || !info.to || !!info.suggest;
+  const cannotSend = !info || !info.configured || !info.to || !!info.suggest || !!adj; // not while an adjustment is unsaved
   return (
     <div className="modal-overlay" onClick={state === "sending" ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -77,6 +102,30 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
                 <div><span>To</span><strong>{info.to || "—"}</strong></div>
                 {info.attachments?.length > 0 && <div><span>Attached</span><strong>{info.attachments.map((a) => <span key={a} style={{ display: "block", color: "inherit", minWidth: 0 }}><Paperclip size={12} style={{ verticalAlign: "-1px" }} /> {a}</span>)}</strong></div>}
               </div>
+              {isInvoice && !adj && (
+                <button type="button" className="link-btn" onClick={openAdjust} disabled={adjBusy}><Pencil size={13} /> Adjust the invoice before sending (lines, amounts, due date, notes)</button>
+              )}
+              {isInvoice && adj && (
+                <div className="email-others">
+                  <span className="calc-note" style={{ margin: 0 }}>Adjust invoice {adj.docNumber || ""} — it's saved when you press Save changes, and the email is rebuilt from it.</span>
+                  {adj.items.map((it) => (
+                    <div key={it.id} className="line-item">
+                      <input className="li-desc" placeholder="Description" value={it.desc || ""} onChange={(e) => setLine(it.id, "desc", e.target.value)} />
+                      <input className="li-num" type="number" placeholder="Qty" value={it.qty ?? ""} onChange={(e) => setLine(it.id, "qty", e.target.value)} />
+                      <input className="li-num" type="number" placeholder="Rate" value={it.rate ?? ""} onChange={(e) => setLine(it.id, "rate", e.target.value)} />
+                      <button type="button" className="icon-btn" onClick={() => setAdj((a) => ({ ...a, items: a.items.filter((x) => x.id !== it.id) }))} aria-label="Remove line"><X size={14} /></button>
+                    </div>
+                  ))}
+                  <button type="button" className="btn-ghost small" onClick={() => setAdj((a) => ({ ...a, items: [...a.items, { id: uid(), desc: "", qty: 1, rate: 0 }] }))}><Plus size={13} /> Add line</button>
+                  <label className="field"><span>Due date</span><input type="date" value={adj.dueDate || ""} onChange={(e) => setAdj((a) => ({ ...a, dueDate: e.target.value }))} /></label>
+                  <label className="field"><span>Notes on the invoice</span><textarea rows={3} value={adj.notes || ""} onChange={(e) => setAdj((a) => ({ ...a, notes: e.target.value }))} /></label>
+                  <p className="calc-note" style={{ margin: 0 }}>Total inc. GST: <strong>{money(gstBreakdown(itemsTotal(adj.items)).total)}</strong></p>
+                  <div className="modal-actions" style={{ marginTop: 6 }}>
+                    <button type="button" className="btn-ghost" onClick={() => setAdj(null)} disabled={adjBusy}>Cancel</button>
+                    <button type="button" className="btn-primary" onClick={saveAdjust} disabled={adjBusy}><Check size={15} /> {adjBusy ? "Saving…" : "Save changes"}</button>
+                  </div>
+                </div>
+              )}
               {info.others?.length > 0 && (
                 <div className="email-others">
                   <span className="calc-note" style={{ margin: 0 }}>Also include {info.name ? `${info.name}'s` : "this client's"} other {kind === "quote" ? "quotes" : "invoices"} in the same email:</span>

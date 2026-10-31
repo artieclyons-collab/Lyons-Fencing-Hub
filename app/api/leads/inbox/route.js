@@ -13,9 +13,11 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isJobDetails, parseJobDetails } from "@/lib/hipages";
-import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody } from "@/lib/inboxLeads";
+import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody, findPhone } from "@/lib/inboxLeads";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
+import { relevantParts } from "@/lib/relevant";
+import { clientFromQuotes } from "@/lib/leadQuotes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,10 +134,15 @@ export async function POST(req) {
     const knownEmails = new Set(leads.map((l) => String(l.email || "").trim().toLowerCase()).filter(Boolean));
 
     // A reply is only worth downloading if it's from someone who is already a lead; a first email from a stranger always is.
+    // a client's reply counts too when they have a quote but no lead
+    for (const q of (await supabaseAdmin.from("quotes").select("clientEmail")).data || []) {
+      const x = String(q.clientEmail || "").trim().toLowerCase();
+      if (x) knownEmails.add(x);
+    }
     const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()));
     let quotesCache = null; // loaded only if an email sounds like an acceptance or a decline
     const loadQuotes = async () => {
-      if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,status")).data || [];
+      if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date")).data || [];
       return quotesCache;
     };
     const created = [];
@@ -183,6 +190,19 @@ export async function POST(req) {
         Object.assign(lead, patch);
         updated.push(`${lead.name} (${applied.join(", ")})`);
         console.log(`inbox: lead updated from an email (${applied.join(", ")})`);
+        continue;
+      }
+      // An email from a client who has a quote but no lead is that client: keep what matters, on a lead under their own name.
+      const client = clientFromQuotes(await loadQuotes(), { phone: findPhone(cleanBody(e.text)), email: e.address });
+      if (client) {
+        const rel = relevantParts(cleanBody(e.text), { max: 320 });
+        const id = `eml${String(client.phone || e.address).replace(/\D/g, "").slice(-9) || String(e.address).replace(/[^a-z0-9]/gi, "").slice(0, 24).toLowerCase()}`;
+        if (!rel || leads.some((l) => l.id === id)) continue;
+        const row = { id, name: client.name || e.display || "Client", phone: client.phone || "", email: client.email || String(e.address).toLowerCase(), address: client.address || "", jobType: client.jobType || "Other", status: client.status, notes: `Text ${new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Brisbane", day: "numeric", month: "short" }).format(e.receivedAt)} (email): ${rel.replace(/\s*\n\s*/g, " ")}`, createdAt: new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(e.receivedAt), source: "email" };
+        const { error } = await supabaseAdmin.from("leads").upsert(row, { onConflict: "id", ignoreDuplicates: true });
+        if (error) throw new Error(error.message);
+        leads.push(row);
+        updated.push(`${row.name} (client's email kept)`);
         continue;
       }
       if (isReply(e)) continue;

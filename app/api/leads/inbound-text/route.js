@@ -11,6 +11,8 @@ import { parseAvailability, parseNotesAvailability, withAvailability, detectCanc
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
+import { relevantParts } from "@/lib/relevant";
+import { clientFromQuotes } from "@/lib/leadQuotes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,11 +63,36 @@ export async function POST(req) {
   // An unknown NUMBER (not a saved contact) whose text reads like a fencing enquiry becomes a new lead. A saved contact's
   // name, or a text that doesn't mention fencing or a quote, is treated as personal: dropped, nothing stored.
   if (!lead && !byName) {
+    // A number that belongs to a client with a quote (someone who's accepted, say) is that client, not a new enquiry: keep what they
+    // said, in short, on a lead under their own name.
+    const { data: qrows } = await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date");
+    const client = clientFromQuotes(qrows || [], { phone: rawFrom });
+    if (client) {
+      const rel = relevantParts(text, { max: 320 });
+      if (!rel) return NextResponse.json({ ok: true, matched: false, client: true });
+      const row = {
+        id: `txt${from}`,
+        name: client.name || `Client ${localPhone(rawFrom)}`,
+        phone: localPhone(rawFrom),
+        email: client.email || null,
+        address: client.address || "",
+        jobType: client.jobType || "Other",
+        status: client.status,
+        notes: `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`,
+        createdAt: new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date()),
+        source: "text",
+      };
+      const { error: cErr } = await supabaseAdmin.from("leads").upsert(row, { onConflict: "id", ignoreDuplicates: true });
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+      console.log("inbound-text: a client's text kept on a lead under their own name");
+      return NextResponse.json({ ok: true, matched: false, created: true, client: true, leadId: row.id });
+    }
     const enq = detectEnquiry(text);
     if (!enq.isEnquiry) return NextResponse.json({ ok: true, matched: false });
     const phone = localPhone(rawFrom);
     const clean = text.replace(/\s*\n\s*/g, " ").slice(0, 600);
-    let notes = `Text ${stamp()}: ${clean}`;
+    // Only the details that matter, in plain site-notes style (no "Text …" prefix) so Start quote can read them.
+    let notes = relevantParts(text, { max: 700 }) || clean.slice(0, 200);
     const found = parseAvailability(text);
     if (found.notBefore != null || found.notAfter != null) notes = withAvailability(notes, found);
     const row = {
@@ -147,6 +174,15 @@ export async function POST(req) {
   if (!decided && (mood.cancelled || mood.reschedule) && !existing.includes(clean)) {
     notes = [notes.trim(), "Text " + stamp() + ": " + clean].filter(Boolean).join("\n");
     applied.push(mood.cancelled ? "possible cancellation" : "request to move the visit");
+  }
+
+  // Anything else worth keeping (a new detail, a change, access info) as a short record, not the whole message.
+  if (!decided && !applied.some((a) => /cancellation|move the visit/.test(a))) {
+    const rel = relevantParts(text, { max: 320 });
+    if (rel && !existing.includes(rel.slice(0, 50)) && !notes.includes(rel.slice(0, 50))) {
+      notes = [notes.trim(), `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`].filter(Boolean).join("\n");
+      applied.push("details");
+    }
   }
 
   if (applied.length === 0) return NextResponse.json({ ok: true, matched: true, ignored: true, leadId: lead.id });
