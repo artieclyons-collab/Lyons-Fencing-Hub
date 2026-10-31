@@ -35,6 +35,7 @@ import IntroTextModal from "./IntroTextModal";
 import { hasQuote, quoteTag } from "@/lib/leadQuotes";
 import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
+import LabourInvoice from "./LabourInvoice";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
@@ -1302,7 +1303,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
     if (deposit > 0) {
       items.push({
         id: uid(),
-        desc: "Less: deposit / part-payment already received.",
+        desc: `Less: deposit / part-payment already received (${money(deposit)} inc. GST).`,
         qty: 1,
         rate: Number((-deposit / 1.1).toFixed(2)),
         unit: "job",
@@ -1974,6 +1975,9 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 // ---------- Invoices ----------
 function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
+  const [showLabour, setShowLabour] = useState(false);
+  const [labourPreview, setLabourPreview] = useState(null);
+  const jobAddresses = useMemo(() => [...new Set(invoices.map((i) => [i.address, String(i.suburb || "").replace(/\s+(QLD|NSW)\b.*$/i, "")].filter(Boolean).join(", ")).filter(Boolean))].slice(0, 40), [invoices]);
   useEffect(() => {
     if (pendingOpen?.table !== "invoices") return;
     const i = invoices.find((x) => x.id === pendingOpen.id);
@@ -2007,9 +2011,14 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
           <h1>Invoices</h1>
           <p>What's been billed, and what's still owing.</p>
         </div>
-        <button className="btn-primary" onClick={() => setModal({ mode: "new", data: { items: [], status: "Unpaid", docNumber: previewNumber() } })}>
-          <Plus size={16} /> New invoice
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn-ghost" onClick={() => setShowLabour(true)} title="Make the invoice your labourer sends you for his days and hours">
+            <Hammer size={15} /> Labourer invoice
+          </button>
+          <button className="btn-primary" onClick={() => setModal({ mode: "new", data: { items: [], status: "Unpaid", docNumber: previewNumber() } })}>
+            <Plus size={16} /> New invoice
+          </button>
+        </div>
       </div>
 
       {invoices.length > 0 && (
@@ -2049,6 +2058,8 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
           onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
         />
       )}
+      {showLabour && <LabourInvoice addresses={jobAddresses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
+      {labourPreview && <DocumentPreviewModal type="labour" data={labourPreview} onClose={() => setLabourPreview(null)} />}
     </div>
   );
 }
