@@ -13,7 +13,7 @@ const TITLES = {
 const tone = (n, metric) => (metric === "expense" ? "bad" : n >= 0 ? "good" : "bad");
 const signed = (n) => `${n < 0 ? "−" : ""}${money(Math.abs(n))}`;
 
-export default function FinanceBreakdown({ metric, jobs, weeks, totals, onClose }) {
+export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, onClose }) {
   const [view, setView] = useState("job");
   const [open, setOpen] = useState(null);
   const total = totals[metric];
@@ -74,6 +74,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, onClose 
         <div className="modal-body">
           <div className={`stat-value ${tone(total, metric)}`} style={{ marginTop: 0 }}>{metric === "net" ? signed(total) : money(total)}</div>
           <p className="calc-note" style={{ marginTop: 2 }}>
+            {since ? `Jobs started since ${shortDate(since)}. ` : "All jobs. "}
             {metric === "income" && `From ${counted.length} ${counted.length === 1 ? "job" : "jobs"}. Only paid invoices count.${totals.owing > 0 ? ` A further ${money(totals.owing)} is billed but not paid yet.` : ""}`}
             {metric === "expense" && "Each job's estimated materials cost from its quote, counted from the job's start date (or when its first payment came in)."}
             {metric === "net" && "Paid income less each started job's estimated materials. Labour, fuel and tip fees aren't in here."}
@@ -90,7 +91,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, onClose 
               {counted.map((j) => <JobRow key={j.key} j={j} />)}
               {notStarted.length > 0 && (
                 <>
-                  <p className="calc-note" style={{ marginTop: 14 }}>Booked, not started yet (not counted):</p>
+                  <p className="calc-note" style={{ marginTop: 14 }}>{metric === "net" ? "Booked, not started yet (deposit is counted, materials aren't yet):" : "Booked, not started yet (not counted):"}</p>
                   {notStarted.map((j) => <JobRow key={j.key} j={j} dim />)}
                 </>
               )}

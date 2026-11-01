@@ -37,7 +37,7 @@ import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
 import FinanceBreakdown from "./FinanceBreakdown";
-import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate } from "@/lib/finances";
+import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary } from "@/lib/finances";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
@@ -2497,7 +2497,20 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
   // Income is the paid invoices (inc. GST); expenses are each job's estimated materials cost off its quote (inc. GST),
   // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
   const todayIso = today();
-  const jobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], today: todayIso }), [quotes, invoices, materials, todayIso]);
+  // Only jobs that started on or after this date are counted (remembered on this device; empty = everything). Starts as 2 weeks back.
+  const [from, setFrom] = useState("");
+  useEffect(() => {
+    let v = null;
+    try { v = window.localStorage.getItem("lyons:finances-from"); } catch { /* not remembered */ }
+    setFrom(v === null ? addDays(todayIso, -14) : v);
+  }, []);
+  const chooseFrom = (v) => {
+    setFrom(v);
+    try { window.localStorage.setItem("lyons:finances-from", v); } catch { /* not remembered */ }
+  };
+  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], today: todayIso }), [quotes, invoices, materials, todayIso]);
+  const jobs = useMemo(() => jobsSince(allJobs, from), [allJobs, from]);
+  const booked = useMemo(() => bookedSummary(jobs), [jobs]);
   const totals = useMemo(() => totalsOf(jobs), [jobs]);
   const weeks = useMemo(() => buildWeeks(jobs, todayIso), [jobs, todayIso]);
   const recent = weeks.slice(0, 8).reverse();
@@ -2529,11 +2542,25 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
         </div>
       </div>
 
+      <div className="calc-trigger-row" style={{ alignItems: "center", marginBottom: 12 }}>
+        <span className="cf-label">Jobs started since</span>
+        <input type="date" className="search-filter" value={from} onChange={(e) => chooseFrom(e.target.value)} aria-label="Count jobs started since" />
+        <button type="button" className="btn-ghost small" onClick={() => chooseFrom(addDays(todayIso, -14))}>2 weeks</button>
+        <button type="button" className="btn-ghost small" onClick={() => chooseFrom(addDays(todayIso, -28))}>4 weeks</button>
+        <button type="button" className="btn-ghost small" onClick={() => chooseFrom("")}>All time</button>
+      </div>
+
       <div className="card-grid three">
         {statCard("income", TrendingUp, totals.income, "Total income (paid, inc. GST)", "good")}
         {statCard("expense", TrendingDown, totals.expense, "Expenses (est. materials)", "bad")}
-        {statCard("net", Wallet, totals.net, "Net", totals.net >= 0 ? "good" : "bad")}
+        {statCard("net", Wallet, totals.net, "Net (profit)", totals.net >= 0 ? "good" : "bad")}
       </div>
+      {booked.count > 0 && (
+        <p className="calc-note" style={{ marginTop: -8 }}>
+          {booked.count} booked {booked.count === 1 ? "job hasn't" : "jobs haven't"} started: {money(booked.deposits)} of deposits are in the income, and about {money(booked.materials)} of materials isn't in the expenses yet.
+        </p>
+      )}
+      {jobs.length === 0 && <p className="calc-note">No jobs started since {shortDate(from)}.</p>}
 
       {weeks.length > 0 && (
         <div className="panel">
@@ -2579,7 +2606,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
         </div>
       </details>
 
-      {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} onClose={() => setBreakdown(null)} />}
+      {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} since={from} onClose={() => setBreakdown(null)} />}
 
       {modal && (
         <ExpenseModal
