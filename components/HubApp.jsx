@@ -2494,7 +2494,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
   };
   const remove = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
 
-  // Income is the paid invoices (inc. GST); expenses are each job's estimated materials cost off its quote (inc. GST),
+  // Income is the paid invoices (inc. GST); expenses are each job's estimated materials and labour off its quote,
   // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
   const todayIso = today();
   // Only jobs that started on or after this date are counted (remembered on this device; empty = everything). Starts as 2 weeks back.
@@ -2529,7 +2529,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
     <div>
       <div className="cf-label">{title}{w ? ` · ${weekLabel(w.start)}` : ""}</div>
       <div className="cf-value">{money(w?.income || 0)} <span style={{ fontSize: 13, color: "var(--text-dim)", fontWeight: 500 }}>in</span></div>
-      <div className="cf-label">{money(w?.expense || 0)} materials · net {(w?.net || 0) < 0 ? "−" : ""}{money(Math.abs(w?.net || 0))}</div>
+      <div className="cf-label">{money(w?.expense || 0)} costs · net {(w?.net || 0) < 0 ? "−" : ""}{money(Math.abs(w?.net || 0))}</div>
     </div>
   );
 
@@ -2538,7 +2538,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
       <div className="section-head row">
         <div>
           <h1>Finances</h1>
-          <p>Paid income against each job's estimated materials. Tap a number for the jobs and weeks behind it.</p>
+          <p>Paid income against each job's estimated materials and labour. Tap a number for the jobs and weeks behind it.</p>
         </div>
       </div>
 
@@ -2552,12 +2552,12 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
 
       <div className="card-grid three">
         {statCard("income", TrendingUp, totals.income, "Total income (paid, inc. GST)", "good")}
-        {statCard("expense", TrendingDown, totals.expense, "Expenses (est. materials)", "bad")}
+        {statCard("expense", TrendingDown, totals.expense, "Expenses (materials + labour)", "bad")}
         {statCard("net", Wallet, totals.net, "Net (profit)", totals.net >= 0 ? "good" : "bad")}
       </div>
       {booked.count > 0 && (
         <p className="calc-note" style={{ marginTop: -8 }}>
-          {booked.count} booked {booked.count === 1 ? "job hasn't" : "jobs haven't"} started: {money(booked.deposits)} of deposits are in the income, and about {money(booked.materials)} of materials isn't in the expenses yet.
+          {booked.count} booked {booked.count === 1 ? "job hasn't" : "jobs haven't"} started: {money(booked.deposits)} of deposits are in the income, and about {money(booked.costs)} of materials and labour isn't in the expenses yet.
         </p>
       )}
       {jobs.length === 0 && <p className="calc-note">No jobs started since {shortDate(from)}.</p>}
@@ -2574,7 +2574,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
               <div className="chart-col" key={w.start}>
                 <div className="chart-bars">
                   <div className="bar income" style={{ height: `${(w.income / maxVal) * 100}%` }} title={`${weekLabel(w.start)}: ${money(w.income)} in`} />
-                  <div className="bar expense" style={{ height: `${(w.expense / maxVal) * 100}%` }} title={`${weekLabel(w.start)}: ${money(w.expense)} materials`} />
+                  <div className="bar expense" style={{ height: `${(w.expense / maxVal) * 100}%` }} title={`${weekLabel(w.start)}: ${money(w.expense)} materials and labour`} />
                 </div>
                 <div className="chart-label">{shortDate(w.start)}</div>
               </div>
@@ -2582,7 +2582,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
           </div>
           <div className="chart-legend">
             <span><i className="dot income" /> Income</span>
-            <span><i className="dot expense" /> Est. materials</span>
+            <span><i className="dot expense" /> Materials + labour</span>
             <span>weeks starting Monday</span>
           </div>
         </div>

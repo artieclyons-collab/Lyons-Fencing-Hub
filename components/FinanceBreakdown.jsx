@@ -3,12 +3,18 @@
 import { useState } from "react";
 import { X, ChevronDown, ChevronRight } from "lucide-react";
 import { money } from "@/lib/logic";
-import { jobAmount, weekLabel, shortDate, invoiceTotal } from "@/lib/finances";
+import { jobAmount, weekLabel, shortDate, invoiceTotal, labourDetail } from "@/lib/finances";
+
+// "1 labourer x 12h x $35" off the quote's labour fields
+const labourNote = (q) => {
+  const d = labourDetail(q);
+  return d.employees === 0 ? "just you, none paid" : `${d.employees} labourer${d.employees === 1 ? "" : "s"} x ${d.hours}h x $${d.rate}`;
+};
 
 const TITLES = {
   income: "Total income (paid, inc. GST)",
-  expense: "Expenses (estimated materials, inc. GST)",
-  net: "Net (income less estimated materials)",
+  expense: "Expenses (estimated materials + labour)",
+  net: "Net (income less materials and labour)",
 };
 const tone = (n, metric) => (metric === "expense" ? "bad" : n >= 0 ? "good" : "bad");
 const signed = (n) => `${n < 0 ? "−" : ""}${money(Math.abs(n))}`;
@@ -19,7 +25,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
   const total = totals[metric];
 
   const shown = jobs
-    .filter((j) => (metric === "income" ? j.paid > 0 : metric === "expense" ? j.materials > 0 : j.paid > 0 || (j.started && j.materials > 0)))
+    .filter((j) => (metric === "income" ? j.paid > 0 : metric === "expense" ? j.cost > 0 : j.paid > 0 || (j.started && j.cost > 0)))
     .sort((a, b) => b.lastDate.localeCompare(a.lastDate));
   const counted = shown.filter((j) => metric === "income" || j.started);
   const notStarted = metric === "income" ? [] : shown.filter((j) => !j.started);
@@ -31,7 +37,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
   const JobRow = ({ j, dim }) => {
     const isOpen = open === `j${j.key}`;
     const amt = jobAmount(j, metric);
-    const value = metric === "expense" ? j.materials : amt;
+    const value = metric === "expense" ? j.cost : amt;
     return (
       <div className="fin-item" style={dim ? { opacity: 0.6 } : undefined}>
         <div className="fin-row" onClick={() => setOpen(isOpen ? null : `j${j.key}`)}>
@@ -57,7 +63,11 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
               <span>Estimated materials{j.started ? "" : " (not counted until the job starts)"}</span>
               <span>{j.materials > 0 ? money(j.materials) : "none saved"}</span>
             </div>
-            {j.started && <div className="calc-row calc-row-total"><span>Paid less materials</span><span>{signed(j.paid - j.materials)}</span></div>}
+            <div className="calc-row">
+              <span>Labour{j.quote ? ` (${labourNote(j.quote)})` : ""}</span>
+              <span>{j.labour > 0 ? money(j.labour) : "$0.00"}</span>
+            </div>
+            {j.started && <div className="calc-row calc-row-total"><span>Paid less materials and labour</span><span>{signed(j.paid - j.cost)}</span></div>}
           </div>
         )}
       </div>
@@ -76,8 +86,8 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
           <p className="calc-note" style={{ marginTop: 2 }}>
             {since ? `Jobs started since ${shortDate(since)}. ` : "All jobs. "}
             {metric === "income" && `From ${counted.length} ${counted.length === 1 ? "job" : "jobs"}. Only paid invoices count.${totals.owing > 0 ? ` A further ${money(totals.owing)} is billed but not paid yet.` : ""}`}
-            {metric === "expense" && "Each job's estimated materials cost from its quote, counted from the job's start date (or when its first payment came in)."}
-            {metric === "net" && "Paid income less each started job's estimated materials. Labour, fuel and tip fees aren't in here."}
+            {metric === "expense" && "Each job's estimated materials and labour from its quote, counted from the job's start date (or when its first payment came in). Labour is what's filled in on the quote: labourers x hours x rate, so your own time isn't in it."}
+            {metric === "net" && "Paid income less each started job's estimated materials and labour. Fuel and tip fees aren't in here."}
           </p>
 
           <div className="calc-trigger-row" style={{ marginBottom: 10 }}>
@@ -91,7 +101,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
               {counted.map((j) => <JobRow key={j.key} j={j} />)}
               {notStarted.length > 0 && (
                 <>
-                  <p className="calc-note" style={{ marginTop: 14 }}>{metric === "net" ? "Booked, not started yet (deposit is counted, materials aren't yet):" : "Booked, not started yet (not counted):"}</p>
+                  <p className="calc-note" style={{ marginTop: 14 }}>{metric === "net" ? "Booked, not started yet (deposit is counted, materials and labour aren't yet):" : "Booked, not started yet (not counted):"}</p>
                   {notStarted.map((j) => <JobRow key={j.key} j={j} dim />)}
                 </>
               )}
@@ -110,7 +120,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
                       {isOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                       <div className="fin-main">
                         <div className="fin-title">{weekLabel(w.start)}</div>
-                        <div className="fin-meta">{metric === "net" ? `in ${money(w.income)} · materials ${money(w.expense)}` : `${new Set(w.lines.filter((l) => (metric === "income" ? l.kind === "income" : l.kind === "expense")).map((l) => l.job.key)).size} job(s)`}</div>
+                        <div className="fin-meta">{metric === "net" ? `in ${money(w.income)} · costs ${money(w.expense)}` : `${new Set(w.lines.filter((l) => (metric === "income" ? l.kind === "income" : l.kind === "expense")).map((l) => l.job.key)).size} job(s)`}</div>
                       </div>
                       <div className={`fin-amt ${tone(v, metric)}`}>{metric === "net" ? signed(v) : money(v)}</div>
                     </div>
