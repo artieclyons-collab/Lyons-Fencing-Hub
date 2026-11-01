@@ -36,6 +36,8 @@ import { hasQuote, quoteTag } from "@/lib/leadQuotes";
 import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
+import FinanceBreakdown from "./FinanceBreakdown";
+import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate } from "@/lib/finances";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
@@ -2481,8 +2483,9 @@ function Clients({ leads, quotes, invoices, go }) {
 }
 
 // ---------- Finances ----------
-function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
+function Finances({ invoices, expenses, setExpenses, quotes, materials, settings }) {
   const [modal, setModal] = useState(null);
+  const [breakdown, setBreakdown] = useState(null); // which number was tapped: "income" | "expense" | "net"
 
   const save = (data) => {
     if (data.id) setExpenses((es) => es.map((e) => (e.id === data.id ? data : e)));
@@ -2491,107 +2494,78 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
   };
   const remove = (id) => setExpenses((es) => es.filter((e) => e.id !== id));
 
-  const paidInvoices = invoices.filter((i) => i.status === "Paid");
-  // Income shown inc. GST, since expenses are logged as the GST-inclusive amount
-  // off a receipt — comparing ex-GST income to inc-GST expenses understated
-  // revenue against costs.
-  const totalIncome = paidInvoices.reduce((s, i) => s + gstBreakdown(itemsTotal(i.items)).total, 0);
-  const totalExpense = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const actualFuelSpend = expenses.filter((e) => e.category === "Fuel").reduce((s, e) => s + Number(e.amount || 0), 0);
-  const estimatedFuelAcrossQuotes = (quotes || []).reduce((s, q) => s + estFuelCost(q.distanceKm, settings), 0);
+  // Income is the paid invoices (inc. GST); expenses are each job's estimated materials cost off its quote (inc. GST),
+  // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
+  const todayIso = today();
+  const jobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], today: todayIso }), [quotes, invoices, materials, todayIso]);
+  const totals = useMemo(() => totalsOf(jobs), [jobs]);
+  const weeks = useMemo(() => buildWeeks(jobs, todayIso), [jobs, todayIso]);
+  const recent = weeks.slice(0, 8).reverse();
+  const maxVal = Math.max(1, ...recent.flatMap((w) => [w.income, w.expense]));
+  const [thisWeek, lastWeek] = [weeks[0], weeks[1]];
 
-  const byMonth = useMemo(() => {
-    const map = {};
-    paidInvoices.forEach((i) => {
-      const m = (i.paidDate || i.issuedDate || "").slice(0, 7);
-      if (!m) return;
-      map[m] = map[m] || { income: 0, expense: 0 };
-      map[m].income += gstBreakdown(itemsTotal(i.items)).total;
-    });
-    expenses.forEach((e) => {
-      const m = (e.date || "").slice(0, 7);
-      if (!m) return;
-      map[m] = map[m] || { income: 0, expense: 0 };
-      map[m].expense += Number(e.amount || 0);
-    });
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoices, expenses]);
-
-  const maxVal = Math.max(1, ...byMonth.flatMap(([, v]) => [v.income, v.expense]));
+  const statCard = (metric, Icon, value, label, cls) => (
+    <div className="stat-card" role="button" tabIndex={0} onClick={() => setBreakdown(metric)} onKeyDown={(e) => e.key === "Enter" && setBreakdown(metric)}>
+      <Icon size={20} />
+      <div className={`stat-value ${cls}`}>{value < 0 ? "−" : ""}{money(Math.abs(value))}</div>
+      <div className="stat-label">{label}</div>
+      <div className="calc-note" style={{ margin: "2px 0 0" }}>Tap for the breakdown</div>
+    </div>
+  );
+  const weekStrip = (title, w) => (
+    <div>
+      <div className="cf-label">{title}{w ? ` · ${weekLabel(w.start)}` : ""}</div>
+      <div className="cf-value">{money(w?.income || 0)} <span style={{ fontSize: 13, color: "var(--text-dim)", fontWeight: 500 }}>in</span></div>
+      <div className="cf-label">{money(w?.expense || 0)} materials · net {(w?.net || 0) < 0 ? "−" : ""}{money(Math.abs(w?.net || 0))}</div>
+    </div>
+  );
 
   return (
     <div>
       <div className="section-head row">
         <div>
           <h1>Finances</h1>
-          <p>Paid income against logged expenses.</p>
+          <p>Paid income against each job's estimated materials. Tap a number for the jobs and weeks behind it.</p>
         </div>
-        <button className="btn-primary" onClick={() => setModal({ mode: "new", data: { date: today(), category: EXPENSE_CATEGORIES[0] } })}>
-          <Plus size={16} /> Log expense
-        </button>
       </div>
 
       <div className="card-grid three">
-        <div className="stat-card static">
-          <TrendingUp size={20} />
-          <div className="stat-value good">{money(totalIncome)}</div>
-          <div className="stat-label">Total income (paid, inc. GST)</div>
-        </div>
-        <div className="stat-card static">
-          <TrendingDown size={20} />
-          <div className="stat-value bad">{money(totalExpense)}</div>
-          <div className="stat-label">Total expenses (inc. GST)</div>
-        </div>
-        <div className="stat-card static">
-          <Wallet size={20} />
-          <div className={`stat-value ${totalIncome - totalExpense >= 0 ? "good" : "bad"}`}>{money(totalIncome - totalExpense)}</div>
-          <div className="stat-label">Net</div>
-        </div>
+        {statCard("income", TrendingUp, totals.income, "Total income (paid, inc. GST)", "good")}
+        {statCard("expense", TrendingDown, totals.expense, "Expenses (est. materials)", "bad")}
+        {statCard("net", Wallet, totals.net, "Net", totals.net >= 0 ? "good" : "bad")}
       </div>
 
-      {byMonth.length > 0 && (
+      {weeks.length > 0 && (
         <div className="panel">
-          <div className="panel-head"><span>Last {byMonth.length} months</span></div>
+          <div className="panel-head"><span>Weekly</span></div>
+          <div className="cashflow-row" style={{ marginBottom: 12 }}>
+            {weekStrip("This week", thisWeek)}
+            {weekStrip("Last week", lastWeek)}
+          </div>
           <div className="chart">
-            {byMonth.map(([m, v]) => (
-              <div className="chart-col" key={m}>
+            {recent.map((w) => (
+              <div className="chart-col" key={w.start}>
                 <div className="chart-bars">
-                  <div className="bar income" style={{ height: `${(v.income / maxVal) * 100}%` }} title={money(v.income)} />
-                  <div className="bar expense" style={{ height: `${(v.expense / maxVal) * 100}%` }} title={money(v.expense)} />
+                  <div className="bar income" style={{ height: `${(w.income / maxVal) * 100}%` }} title={`${weekLabel(w.start)}: ${money(w.income)} in`} />
+                  <div className="bar expense" style={{ height: `${(w.expense / maxVal) * 100}%` }} title={`${weekLabel(w.start)}: ${money(w.expense)} materials`} />
                 </div>
-                <div className="chart-label">{m.slice(5)}/{m.slice(2, 4)}</div>
+                <div className="chart-label">{shortDate(w.start)}</div>
               </div>
             ))}
           </div>
           <div className="chart-legend">
             <span><i className="dot income" /> Income</span>
-            <span><i className="dot expense" /> Expenses</span>
+            <span><i className="dot expense" /> Est. materials</span>
+            <span>weeks starting Monday</span>
           </div>
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-head"><Fuel size={16} /><span>Fuel</span></div>
-        <div className="cashflow-row">
-          <div>
-            <div className="cf-label">Logged fuel spend</div>
-            <div className="cf-value bad">{money(actualFuelSpend)}</div>
-          </div>
-          <div>
-            <div className="cf-label">Estimated across quoted jobs</div>
-            <div className="cf-value">{money(estimatedFuelAcrossQuotes)}</div>
-          </div>
+      <details className="panel">
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Logged expenses ({expenses.length}) — not counted in the numbers above</summary>
+        <div style={{ margin: "10px 0" }}>
+          <button className="btn-ghost small" onClick={() => setModal({ mode: "new", data: { date: today(), category: EXPENSE_CATEGORIES[0] } })}><Plus size={13} /> Log expense</button>
         </div>
-        <p className="calc-note" style={{ marginTop: 8 }}>
-          "Logged" is what you've entered as Fuel expenses below. "Estimated" is worked out from the distance you enter on each quote — set it in Materials & fuel settings (gear icon, top right).
-        </p>
-      </div>
-
-      <h2 className="sub-head">Expenses</h2>
-      {expenses.length === 0 ? (
-        <EmptyState icon={Wallet} title="No expenses logged" hint="Log fuel, materials, tools and other costs as they happen." onAdd={() => setModal({ mode: "new", data: { date: today(), category: EXPENSE_CATEGORIES[0] } })} addLabel="Log expense" />
-      ) : (
         <div className="list">
           {expenses.map((e) => (
             <div className="row-card" key={e.id} onClick={() => setModal({ mode: "edit", data: e })}>
@@ -2603,7 +2577,9 @@ function Finances({ invoices, expenses, setExpenses, quotes, settings }) {
             </div>
           ))}
         </div>
-      )}
+      </details>
+
+      {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} onClose={() => setBreakdown(null)} />}
 
       {modal && (
         <ExpenseModal
@@ -3987,7 +3963,7 @@ export default function HubApp() {
             {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
-            {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} />}
+            {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} />}
           </>
         )}
       </main>

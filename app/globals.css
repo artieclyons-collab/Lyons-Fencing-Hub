@@ -522,3 +522,15 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .vp-dragbar-days{ display:flex; gap:6px; overflow-x:auto; }
 .vp-dragbar-days button{ flex:none; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--surface2); color:var(--text); font-family:inherit; font-size:13px; }
 .vp-dragbar-days button.on{ background:var(--hivis); color:#1a1a1a; border-color:var(--hivis); font-weight:700; }
+
+/* Finances breakdown (components/FinanceBreakdown.jsx) */
+.fin-item{ border-top:1px solid var(--line); }
+.fin-row{ display:flex; align-items:center; gap:8px; padding:10px 2px; cursor:pointer; }
+.fin-main{ flex:1; min-width:0; }
+.fin-title{ font-weight:600; font-size:14px; }
+.fin-doc{ color:var(--text-dim); font-weight:400; font-size:12px; }
+.fin-meta{ font-size:11.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fin-amt{ font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:700; white-space:nowrap; }
+.fin-amt.good{ color:var(--good); }
+.fin-amt.bad{ color:var(--bad); }
+.fin-detail{ background:var(--surface2); border-radius:6px; padding:6px 10px; margin:0 0 10px 22px; }
