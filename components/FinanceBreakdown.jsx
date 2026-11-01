@@ -29,7 +29,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
     .sort((a, b) => b.lastDate.localeCompare(a.lastDate));
   const counted = shown.filter((j) => metric === "income" || j.started);
   const notStarted = metric === "income" ? [] : shown.filter((j) => !j.started);
-  const noEstimate = metric === "income" ? [] : jobs.filter((j) => j.started && j.materials <= 0);
+  const noEstimate = metric === "income" ? [] : jobs.filter((j) => j.quote && j.started && j.materials <= 0);
 
   const weekRows = weeks.filter((w) => (metric === "income" ? w.income > 0 : metric === "expense" ? w.expense > 0 : w.income > 0 || w.expense > 0));
   const weekValue = (w) => (metric === "income" ? w.income : metric === "expense" ? w.expense : w.net);
@@ -64,7 +64,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
               <span>{j.materials > 0 ? money(j.materials) : "none saved"}</span>
             </div>
             <div className="calc-row">
-              <span>Labour{j.quote ? ` (${labourNote(j.quote)})` : ""}</span>
+              <span>Labour{j.labourLines?.length ? ` (labourer invoice ${[...new Set(j.labourLines.map((l) => l.number))].join(", ")})` : j.quote ? ` (estimate: ${labourNote(j.quote)})` : ""}</span>
               <span>{j.labour > 0 ? money(j.labour) : "$0.00"}</span>
             </div>
             {j.started && <div className="calc-row calc-row-total"><span>Paid less materials and labour</span><span>{signed(j.paid - j.cost)}</span></div>}

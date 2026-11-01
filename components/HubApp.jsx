@@ -38,6 +38,7 @@ import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
 import FinanceBreakdown from "./FinanceBreakdown";
 import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary } from "@/lib/finances";
+import { labourLines, isLabourRow } from "@/lib/labourInvoice";
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
@@ -1975,11 +1976,11 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 }
 
 // ---------- Invoices ----------
-function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen, clearOpen }) {
+function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
   const [showLabour, setShowLabour] = useState(false);
   const [labourPreview, setLabourPreview] = useState(null);
-  const jobAddresses = useMemo(() => [...new Set(invoices.map((i) => [i.address, String(i.suburb || "").replace(/\s+(QLD|NSW)\b.*$/i, "")].filter(Boolean).join(", ")).filter(Boolean))].slice(0, 40), [invoices]);
+  const jobAddresses = useMemo(() => [...new Set([...(quotes || []).filter((q) => q.status === "Accepted"), ...invoices].map((i) => [i.address, String(i.suburb || "").replace(/\s+(QLD|NSW)\b.*$/i, "")].filter(Boolean).join(", ")).filter(Boolean))].slice(0, 60), [quotes, invoices]);
   useEffect(() => {
     if (pendingOpen?.table !== "invoices") return;
     const i = invoices.find((x) => x.id === pendingOpen.id);
@@ -2060,7 +2061,7 @@ function Invoices({ invoices, setInvoices, settings, bumpDocNumber, pendingOpen,
           onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
         />
       )}
-      {showLabour && <LabourInvoice addresses={jobAddresses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
+      {showLabour && <LabourInvoice addresses={jobAddresses} expenses={expenses} setExpenses={setExpenses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
       {labourPreview && <DocumentPreviewModal type="labour" data={labourPreview} onClose={() => setLabourPreview(null)} />}
     </div>
   );
@@ -2508,7 +2509,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
     setFrom(v);
     try { window.localStorage.setItem("lyons:finances-from", v); } catch { /* not remembered */ }
   };
-  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], today: todayIso }), [quotes, invoices, materials, todayIso]);
+  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
+  const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e)), [expenses]);
   const jobs = useMemo(() => jobsSince(allJobs, from), [allJobs, from]);
   const booked = useMemo(() => bookedSummary(jobs), [jobs]);
   const totals = useMemo(() => totalsOf(jobs), [jobs]);
@@ -2589,12 +2591,12 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
       )}
 
       <details className="panel">
-        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Logged expenses ({expenses.length}) — not counted in the numbers above</summary>
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Logged expenses ({manualExpenses.length}) — not counted in the numbers above</summary>
         <div style={{ margin: "10px 0" }}>
           <button className="btn-ghost small" onClick={() => setModal({ mode: "new", data: { date: today(), category: EXPENSE_CATEGORIES[0] } })}><Plus size={13} /> Log expense</button>
         </div>
         <div className="list">
-          {expenses.map((e) => (
+          {manualExpenses.map((e) => (
             <div className="row-card" key={e.id} onClick={() => setModal({ mode: "edit", data: e })}>
               <div className="row-card-main">
                 <div className="row-card-title">{e.description || e.category}</div>
@@ -3987,7 +3989,7 @@ export default function HubApp() {
             {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
             {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
-            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} settings={settings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
+            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} />}

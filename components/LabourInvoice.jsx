@@ -7,7 +7,7 @@ import { X, Plus, Download, FileText, Trash2, CalendarDays, Send } from "lucide-
 import { uid, today, money } from "@/lib/logic";
 import { addDaysIso } from "@/lib/jobSchedule";
 import { smsLink } from "@/lib/introText";
-import { LABOURER, PAYER, fmtAbn, parseHours, labourTotals, fmtHours, dayLabel, longDate, paidHours, encodeLabour } from "@/lib/labourInvoice";
+import { LABOURER, PAYER, fmtAbn, parseHours, labourTotals, fmtHours, dayLabel, longDate, paidHours, encodeLabour, isLabourRow, labourRow, labourFromRow } from "@/lib/labourInvoice";
 
 const KEY = "lyons:labour-invoice";
 const QUICK_HOURS = [6, 7, 8, 9, 10];
@@ -35,7 +35,7 @@ const nextDay = (iso) => { let d = addDaysIso(iso, 1); if (dow(d) === 0) d = add
 const periodOf = (rows) => (rows.length ? (rows[0].date === rows[rows.length - 1].date ? longDate(rows[0].date) : `${longDate(rows[0].date)} – ${longDate(rows[rows.length - 1].date)}`) : "");
 const shortPeriod = (rows) => (rows.length ? (rows[0].date === rows[rows.length - 1].date ? dayLabel(rows[0].date) : `${dayLabel(rows[0].date)} – ${dayLabel(rows[rows.length - 1].date)}`) : "");
 
-export default function LabourInvoice({ addresses = [], onClose, onPreview }) {
+export default function LabourInvoice({ addresses = [], expenses = [], setExpenses, onClose, onPreview }) {
   const [inv, setInv] = useState(null); // null until the saved draft has loaded on this device
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -47,6 +47,28 @@ export default function LabourInvoice({ addresses = [], onClose, onPreview }) {
   }, [inv]);
 
   const totals = useMemo(() => (inv ? labourTotals(inv) : { rows: [], totalHours: 0, total: 0 }), [inv]);
+
+  // Invoices are kept in the hub (see labourRow in lib/labourInvoice.js), so every device and the Finances tab see them.
+  const past = useMemo(
+    () => expenses.filter(isLabourRow).map((row) => ({ row, doc: labourFromRow(row) })).filter((x) => x.doc).sort((a, b) => Number(b.doc.number) - Number(a.doc.number)),
+    [expenses]
+  );
+  const saveToHub = (doc) => {
+    const row = labourRow(doc);
+    setExpenses?.((es) => (es.some((e) => e.id === row.id) ? es.map((e) => (e.id === row.id ? { ...e, ...row } : e)) : [row, ...es]));
+  };
+  // Invoices an earlier version kept only on this device are moved into the hub the first time it's opened.
+  useEffect(() => {
+    if (!inv || !setExpenses || inv.history.length === 0) return;
+    for (const h of inv.history) if (h?.doc) saveToHub(h.doc);
+    setInv((i) => ({ ...i, history: [] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inv?.history?.length]);
+  // A fresh invoice never reuses a number that's already in the hub (a new device starts at 1, for instance).
+  const topNumber = Math.max(0, ...past.map((p) => Number(p.doc.number) || 0));
+  useEffect(() => {
+    if (inv && inv.days.length === 0 && (Number(inv.number) || 0) <= topNumber) setInv((i) => ({ ...i, number: topNumber + 1 }));
+  }, [inv?.days?.length, inv?.number, topNumber]);
   if (!inv) return null;
 
   const set = (k, v) => setInv((i) => ({ ...i, [k]: v }));
@@ -73,11 +95,13 @@ export default function LabourInvoice({ addresses = [], onClose, onPreview }) {
   };
 
   // Once an invoice has gone out (downloaded or texted) it's kept in "Past invoices" and the next one starts, numbered one higher.
-  const finish = (sent, how) => setInv((i) => {
-    const entry = { id: uid(), number: sent.number, date: sent.date, total: labourTotals(sent).total, period: shortPeriod(labourTotals(sent).rows), how, doc: sent };
-    const top = Math.max(Number(i.number) || 0, ...i.history.map((h) => Number(h.number) || 0), Number(sent.number) || 0);
-    return { ...i, history: [entry, ...i.history].slice(0, 60), number: top + 1, date: today(), days: [], notes: "" };
-  });
+  const finish = (sent) => {
+    saveToHub(sent);
+    setInv((i) => {
+      const top = Math.max(Number(i.number) || 0, Number(sent.number) || 0, ...past.map((p) => Number(p.doc.number) || 0));
+      return { ...i, number: top + 1, date: today(), days: [], notes: "" };
+    });
+  };
 
   const snapshot = () => { const { history, ...rest } = inv; return { ...rest, days: inv.days.map((d) => ({ ...d })) }; }; // what goes out, without the past-invoices list
 
@@ -111,20 +135,25 @@ export default function LabourInvoice({ addresses = [], onClose, onPreview }) {
   const download = () => run(async () => {
     const sent = snapshot();
     await saveFile(sent);
-    finish(sent, "downloaded");
+    finish(sent);
     setNote(`Downloaded invoice ${sent.number}. Now on invoice ${Number(sent.number) + 1}.`);
   });
   const text = () => {
     const sent = snapshot();
     textDoc(sent);
-    finish(sent, "texted");
+    finish(sent);
     setNote(`Opened Messages to Usher for invoice ${sent.number} — press send there. Now on invoice ${Number(sent.number) + 1}.`);
   };
 
-  const reopen = (h) => {
+  // Opens a saved invoice to change; saving/sending it again replaces that invoice (same number).
+  const reopen = (doc) => {
     if (inv.days.length > 0 && !window.confirm("This replaces the days you've got on the screen now. Carry on?")) return;
-    setInv((i) => ({ ...i, ...h.doc, history: i.history.filter((x) => x.id !== h.id), number: h.number }));
-    setNote("");
+    setInv((i) => ({ ...i, number: doc.number, date: doc.date, rate: doc.rate, lunchMin: doc.lunchMin, bank: { ...i.bank, ...doc.bank }, notes: doc.notes || "", days: doc.days.map((d) => ({ ...d, hours: String(d.hours) })) }));
+    setNote(`Invoice ${doc.number} is open to change. Download or text it again to save the new version.`);
+  };
+  const removeSaved = (p) => {
+    if (!window.confirm(`Delete invoice ${p.doc.number} from the hub? The Finances labour figures drop it too.`)) return;
+    setExpenses?.((es) => es.filter((e) => e.id !== p.row.id));
   };
 
   const ready = totals.rows.length > 0 && problems.length === 0;
@@ -199,19 +228,23 @@ export default function LabourInvoice({ addresses = [], onClose, onPreview }) {
             <label className="field"><span>Notes on the invoice (optional)</span><textarea rows={2} value={inv.notes} onChange={(e) => set("notes", e.target.value)} /></label>
           </details>
 
-          {inv.history.length > 0 && (
+          {past.length > 0 && (
             <details style={{ marginBottom: 12 }}>
-              <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13, marginBottom: 10 }}>Past invoices ({inv.history.length})</summary>
-              {inv.history.map((h) => (
-                <div key={h.id} className="calc-row" style={{ alignItems: "center", gap: 8 }}>
-                  <span style={{ flex: 1, minWidth: 0, color: "var(--text)", fontWeight: 400 }}>
-                    <strong>#{h.number}</strong> · {h.period} · {money(h.total)} <span style={{ color: "var(--text-dim)" }}>({h.how})</span>
-                  </span>
-                  <button type="button" className="btn-ghost small" onClick={() => run(() => saveFile(h.doc))} disabled={busy}>PDF</button>
-                  <button type="button" className="btn-ghost small" onClick={() => textDoc(h.doc)}>Text</button>
-                  <button type="button" className="btn-ghost small" onClick={() => reopen(h)}>Edit</button>
-                </div>
-              ))}
+              <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13, marginBottom: 10 }}>Past invoices ({past.length})</summary>
+              {past.map((p) => {
+                const t = labourTotals(p.doc);
+                return (
+                  <div key={p.row.id} className="calc-row" style={{ alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ flex: 1, minWidth: 160, color: "var(--text)", fontWeight: 400 }}>
+                      <strong>#{p.doc.number}</strong> · {shortPeriod(t.rows)} · {fmtHours(t.totalHours)}h · {money(t.total)}
+                    </span>
+                    <button type="button" className="btn-ghost small" onClick={() => run(() => saveFile(p.doc))} disabled={busy}>PDF</button>
+                    <button type="button" className="btn-ghost small" onClick={() => textDoc(p.doc)}>Text</button>
+                    <button type="button" className="btn-ghost small" onClick={() => reopen(p.doc)}>Edit</button>
+                    <button type="button" className="icon-btn" onClick={() => removeSaved(p)} aria-label="Delete invoice"><Trash2 size={14} /></button>
+                  </div>
+                );
+              })}
             </details>
           )}
 
