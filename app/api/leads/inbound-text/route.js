@@ -13,6 +13,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
+import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,22 @@ const stamp = () =>
     .replace(",", "")
     .replace(/\s?([ap])m/i, (_, x) => `${x.toLowerCase()}m`);
 
+// Remembers that the phone got a text through (or that one arrived with nothing usable in it), so the Board can show whether the
+// Shortcut is reaching the hub. Never stores anything from the message itself.
+async function noteArrival(usable) {
+  try {
+    const { data } = await supabaseAdmin.from("expenses").select("description").eq("id", TEXT_IN_ID).maybeSingle();
+    let state = {};
+    try { state = JSON.parse(data?.description || "{}") || {}; } catch { /* start again */ }
+    const now = new Date().toISOString();
+    if (usable) state.last = now; else state.empty = now;
+    state.n = (Number(state.n) || 0) + 1;
+    await supabaseAdmin.from("expenses").upsert({ id: TEXT_IN_ID, category: SYSTEM_CATEGORY, description: JSON.stringify(state), amount: "0", date: now.slice(0, 10) });
+  } catch (e) {
+    console.log("inbound-text: couldn't note the arrival —", String(e?.message || e).slice(0, 120));
+  }
+}
+
 export async function POST(req) {
   if (!process.env.PHONE_AGENT_API_KEY) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,6 +62,7 @@ export async function POST(req) {
   const text = String(body.text ?? body.message ?? "").trim();
   // iPhone Shortcuts gives a saved contact's NAME instead of the number, so a sender with no digits is matched by exact name.
   const byName = !/\d/.test(rawFrom) && rawFrom.length >= 2;
+  await noteArrival(!((!byName && from.length < 8) || !text));
   if ((!byName && from.length < 8) || !text) {
     // Nothing usable arrived (e.g. a Shortcut variable that came through empty) — say so in the log, never the content.
     console.log(`inbound-text: ignored, nothing usable (from is ${rawFrom.length} chars, text is ${text.length} chars, body keys: ${Object.keys(body).join(",") || "none"})`);

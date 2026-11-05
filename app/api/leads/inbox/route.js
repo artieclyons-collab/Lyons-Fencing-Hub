@@ -13,7 +13,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isJobDetails, parseJobDetails } from "@/lib/hipages";
-import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody, findPhone } from "@/lib/inboxLeads";
+import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody, findPhone, nameKeys } from "@/lib/inboxLeads";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
@@ -135,11 +135,15 @@ export async function POST(req) {
 
     // A reply is only worth downloading if it's from someone who is already a lead; a first email from a stranger always is.
     // a client's reply counts too when they have a quote but no lead
-    for (const q of (await supabaseAdmin.from("quotes").select("clientEmail")).data || []) {
+    const knownNames = new Set(leads.flatMap((l) => nameKeys(l.name)));
+    for (const q of (await supabaseAdmin.from("quotes").select("clientEmail,clientName")).data || []) {
       const x = String(q.clientEmail || "").trim().toLowerCase();
       if (x) knownEmails.add(x);
+      for (const k of nameKeys(q.clientName)) knownNames.add(k);
     }
-    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()));
+    // A reply is worth reading when it's from a known address, from someone whose name is a lead or a client (they may be writing from
+    // an address the hub never saw, like a quote that was emailed before the hub did it), or it's a reply to one of your own quote emails.
+    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()) || nameKeys(s.display).some((k) => knownNames.has(k)) || /lyons fencing/i.test(s.subject));
     let quotesCache = null; // loaded only if an email sounds like an acceptance or a decline
     const loadQuotes = async () => {
       if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date")).data || [];
@@ -165,7 +169,7 @@ export async function POST(req) {
       }
 
       // A person's email.
-      const lead = matchLead(leads, { address: e.address, text: e.text });
+      const lead = matchLead(leads, { address: e.address, text: e.text, display: isReply(e) ? e.display : "" });
       if (lead) {
         // "Yep go ahead" / "we've gone with someone else": moves their one sent quote to Accepted / Declined.
         let dec = null;

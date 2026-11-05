@@ -37,8 +37,27 @@ import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
 import FinanceBreakdown from "./FinanceBreakdown";
-import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary } from "@/lib/finances";
+import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary, projectedOf } from "@/lib/finances";
 import { labourLines, isLabourRow } from "@/lib/labourInvoice";
+import { isSystemRow, textLinkStatus } from "@/lib/systemRows";
+
+// Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
+// It starts at the day Artie got back to Australia.
+const FINANCES_FROM_KEY = "lyons:finances-from";
+const FINANCES_FROM_DEFAULT = "2026-10-18";
+function useFinancesFrom() {
+  const [from, setFrom] = useState(FINANCES_FROM_DEFAULT);
+  useEffect(() => {
+    let v = null;
+    try { v = window.localStorage.getItem(FINANCES_FROM_KEY); } catch { /* not remembered */ }
+    if (v !== null) setFrom(v);
+  }, []);
+  const choose = (v) => {
+    setFrom(v);
+    try { window.localStorage.setItem(FINANCES_FROM_KEY, v); } catch { /* not remembered */ }
+  };
+  return [from, choose];
+}
 import MoveSheet from "./MoveSheet";
 import { useVisitDrag } from "./useVisitDrag";
 import DaySheet from "./DaySheet";
@@ -582,14 +601,48 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   }
   const todayCount = soon.filter((e) => e.date === t).length;
 
-  // ----- money this month -----
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  // Income inc. GST, to match expenses (logged as the GST-inclusive receipt amount) — otherwise "Net" compares apples to oranges.
-  const monthIncome = sum(
-    invoices.filter((i) => i.status === "Paid" && (i.paidDate || i.issuedDate || "").slice(0, 7) === thisMonth),
-    (i) => inc(i.items)
+  // ----- money: what's come in and gone out so far, and what the booked jobs should make (same numbers as the Finances tab) -----
+  const [moneyFrom] = useFinancesFrom();
+  const moneyJobs = useMemo(
+    () => jobsSince(buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), today: t }), moneyFrom),
+    [quotes, invoices, materials, expenses, moneyFrom, t]
   );
-  const monthExpense = sum(expenses.filter((e) => (e.date || "").slice(0, 7) === thisMonth), (e) => Number(e.amount || 0));
+  const actual = useMemo(() => totalsOf(moneyJobs), [moneyJobs]);
+  const projected = useMemo(() => projectedOf(moneyJobs), [moneyJobs]);
+  const textLink = textLinkStatus(expenses);
+  const fmtWhen = (iso) => new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Brisbane", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso)).replace(",", "").replace(/\s?([ap])m/i, (_, x) => `${x.toLowerCase()}m`);
+
+  // ----- hipages leads nobody has replied to: the first text should go out straight away -----
+  const unanswered = leads.filter((l) => l.source === "hipages" && l.status === "New" && !hasQuote(l, quotes));
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 30000); return () => clearInterval(id); }, []);
+  // when this device first saw each one (a lead that came in while the Board was closed is only known from the day it was added)
+  const seen = useMemo(() => {
+    let map = {};
+    try { map = JSON.parse(window.localStorage.getItem("lyons:lead-seen") || "{}") || {}; } catch { map = {}; }
+    let changed = false;
+    for (const l of unanswered) if (!map[l.id]) { map[l.id] = Date.now(); changed = true; }
+    if (changed) { try { window.localStorage.setItem("lyons:lead-seen", JSON.stringify(map)); } catch { /* not kept */ } }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unanswered.map((l) => l.id).join(",")]);
+  const waiting = unanswered.map((l) => {
+    const addedToday = !l.createdAt || String(l.createdAt).slice(0, 10) >= t;
+    const mins = addedToday ? Math.max(0, Math.round((Date.now() - (seen[l.id] || Date.now())) / 60000)) : null;
+    return { lead: l, mins, days: addedToday ? 0 : daysSince(String(l.createdAt).slice(0, 10)), late: !addedToday || mins >= 5 };
+  });
+  const notified = useRef({});
+  const [alertsOn, setAlertsOn] = useState(false);
+  useEffect(() => { setAlertsOn(typeof Notification !== "undefined" && Notification.permission === "granted"); }, []);
+  useEffect(() => {
+    document.title = waiting.length > 0 ? `(${waiting.length}) Reply to hipages leads` : "Lyons Fencing Hub";
+    if (!alertsOn) return;
+    for (const w of waiting) {
+      if (!w.late || Date.now() - (notified.current[w.lead.id] || 0) < 15 * 60000) continue;
+      notified.current[w.lead.id] = Date.now();
+      try { new Notification(`Reply to ${w.lead.name || "the new lead"} (hipages)`, { body: w.mins != null ? `Waiting ${w.mins} min — send the first text now.` : `Waiting since ${w.lead.createdAt} — send the first text now.` }); } catch { /* not allowed here */ }
+    }
+  }, [tick, waiting.length, alertsOn]);
 
   const phoneLeads = newLeads.filter((l) => l.source === "phone_agent").length;
   const names = (list, get) => {
@@ -666,6 +719,28 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         </div>
       </div>
 
+      {waiting.length > 0 && (
+        <div className="panel" style={{ borderColor: waiting.some((w) => w.late) ? "var(--bad)" : "var(--hivis)" }}>
+          <div className="panel-head" style={{ color: waiting.some((w) => w.late) ? "var(--bad)" : "var(--hivis)" }}>
+            <Send size={16} />
+            <span>Reply now — {plural(waiting.length, "hipages lead")} waiting</span>
+          </div>
+          {waiting.map((w) => (
+            <div key={w.lead.id} className="attention-row bad" onClick={() => go("leads")}>
+              <Smartphone size={16} />
+              <div className="attention-main">
+                <div>{w.lead.name || "New lead"}{w.lead.address ? ` · ${w.lead.address}` : ""}</div>
+                <div className="attention-sub">{w.mins != null ? (w.mins < 1 ? "just came in" : `waiting ${w.mins} min`) : `came in ${w.days === 1 ? "yesterday" : `${w.days} days ago`}`} — the first text wins the job. Tap to open Leads and send the intro text.</div>
+              </div>
+              <ChevronRight size={16} />
+            </div>
+          ))}
+          {!alertsOn && typeof Notification !== "undefined" && Notification.permission !== "denied" && (
+            <button className="btn-ghost small" style={{ marginTop: 8 }} onClick={() => Notification.requestPermission().then((p) => setAlertsOn(p === "granted"))}>Turn on alerts on this device</button>
+          )}
+        </div>
+      )}
+
       <div className="card-grid">
         {cards.map((c) => (
           <button key={c.label} className={`stat-card tone-${c.tone}${c.warn ? " warn" : ""}`} onClick={() => go(c.tab)}>
@@ -675,6 +750,29 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
             <div className="stat-sub">{c.sub}</div>
           </button>
         ))}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <TrendingUp size={16} />
+          <span>Money{moneyFrom ? ` · jobs since ${shortDate(moneyFrom)}` : " · all jobs"}</span>
+          <button className="link-btn" style={{ marginLeft: "auto", textTransform: "none", letterSpacing: 0 }} onClick={() => go("finances")}>Breakdown</button>
+        </div>
+        <div className="cf-label" style={{ marginBottom: 4 }}>So far — paid in, costs of started jobs</div>
+        <div className="cashflow-row">
+          <div><div className="cf-label">Revenue</div><div className="cf-value good">{money(actual.income)}</div></div>
+          <div><div className="cf-label">Expenses</div><div className="cf-value bad">{money(actual.expense)}</div></div>
+          <div><div className="cf-label">Profit</div><div className={`cf-value ${actual.net >= 0 ? "good" : "bad"}`}>{actual.net < 0 ? "−" : ""}{money(Math.abs(actual.net))}</div></div>
+        </div>
+        <div className="cf-label" style={{ margin: "12px 0 4px" }}>Projected — {plural(projected.count, "booked or started job")} once they're finished and paid</div>
+        <div className="cashflow-row">
+          <div><div className="cf-label">Revenue</div><div className="cf-value good">{money(projected.revenue)}</div></div>
+          <div><div className="cf-label">Costs</div><div className="cf-value bad">{money(projected.cost)}</div></div>
+          <div><div className="cf-label">Profit</div><div className={`cf-value ${projected.profit >= 0 ? "good" : "bad"}`}>{projected.profit < 0 ? "−" : ""}{money(Math.abs(projected.profit))}</div></div>
+        </div>
+        <p className="calc-note" style={{ marginBottom: 0 }}>
+          Inc. GST. Expenses are each job's estimated materials plus labour (the labourer's invoices where there are some). {projected.toCollect > 0 ? `${money(projected.toCollect)} is still to collect on these jobs. ` : ""}{quotesOut.length > 0 ? `Another ${whole(sum(quotesOut, (q) => inc(q.items)))} is out in ${plural(quotesOut.length, "quote")}.` : ""}
+        </p>
       </div>
 
       <DaySheet events={allEvents} quotes={quotes} leads={leads} forecast={forecast} go={go} />
@@ -738,26 +836,12 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
 
       <div className="panel">
-        <div className="panel-head">
-          <TrendingUp size={16} />
-          <span>This month</span>
-        </div>
-        <div className="cashflow-row">
-          <div>
-            <div className="cf-label">Income (paid)</div>
-            <div className="cf-value good">{money(monthIncome)}</div>
-          </div>
-          <div>
-            <div className="cf-label">Expenses</div>
-            <div className="cf-value bad">{money(monthExpense)}</div>
-          </div>
-          <div>
-            <div className="cf-label">Net</div>
-            <div className={`cf-value ${monthIncome - monthExpense >= 0 ? "good" : "bad"}`}>
-              {money(monthIncome - monthExpense)}
-            </div>
-          </div>
-        </div>
+        <div className="panel-head"><Smartphone size={16} /><span>Texts from your phone</span></div>
+        <p className="calc-note" style={{ margin: 0 }}>
+          {textLink.last ? `The last text reached the hub on ${fmtWhen(textLink.last)}.` : "No text from the iPhone Shortcut has reached the hub yet."}
+          {textLink.empty && (!textLink.last || textLink.empty > textLink.last) ? ` A text arrived with nothing in it on ${fmtWhen(textLink.empty)} — the Shortcut isn't passing the sender or the message.` : ""}
+          {" "}If a text from a client isn't showing in Leads and this time is older than it, it never left the phone (no signal, or the Shortcut failed there).
+        </p>
       </div>
 
       {pushOpen && (
@@ -2498,19 +2582,9 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
   // Income is the paid invoices (inc. GST); expenses are each job's estimated materials and labour off its quote,
   // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
   const todayIso = today();
-  // Only jobs that started on or after this date are counted (remembered on this device; empty = everything). Starts as 2 weeks back.
-  const [from, setFrom] = useState("");
-  useEffect(() => {
-    let v = null;
-    try { v = window.localStorage.getItem("lyons:finances-from"); } catch { /* not remembered */ }
-    setFrom(v === null ? addDays(todayIso, -14) : v);
-  }, []);
-  const chooseFrom = (v) => {
-    setFrom(v);
-    try { window.localStorage.setItem("lyons:finances-from", v); } catch { /* not remembered */ }
-  };
+  const [from, chooseFrom] = useFinancesFrom();
   const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
-  const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e)), [expenses]);
+  const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e) && !isSystemRow(e)), [expenses]);
   const jobs = useMemo(() => jobsSince(allJobs, from), [allJobs, from]);
   const booked = useMemo(() => bookedSummary(jobs), [jobs]);
   const totals = useMemo(() => totalsOf(jobs), [jobs]);
