@@ -197,7 +197,8 @@ export async function POST(req) {
   // Anything else worth keeping (a new detail, a change, access info) as a short record, not the whole message.
   if (!decided && !applied.some((a) => /cancellation|move the visit/.test(a))) {
     const rel = relevantParts(text, { max: 320 });
-    if (rel && !existing.includes(rel.slice(0, 50)) && !notes.includes(rel.slice(0, 50))) {
+    const seen = rel ? rel.replace(/\s+/g, " ").trim().slice(0, 50) : "";
+    if (rel && !existing.replace(/\s+/g, " ").includes(seen) && !notes.replace(/\s+/g, " ").includes(seen)) {
       notes = [notes.trim(), `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`].filter(Boolean).join("\n");
       applied.push("details");
     }
