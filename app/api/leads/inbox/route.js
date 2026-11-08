@@ -18,6 +18,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
+import { sendPush, nudgeUnanswered } from "@/lib/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -151,6 +152,7 @@ export async function POST(req) {
     };
     const created = [];
     const updated = [];
+    const alerts = []; // phone alerts to send once the inbox has been read
     let alreadyHave = 0;
     let unreadable = 0;
 
@@ -164,6 +166,7 @@ export async function POST(req) {
         if (error) throw new Error(error.message);
         leads.push(row);
         created.push(row.name);
+        alerts.push({ title: `New hipages lead: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "Job details are in"}. Reply now, the first text wins.`, tag: `lead-${row.id}`, url: "/" });
         console.log("inbox: new lead added from a hipages job-details email");
         continue;
       }
@@ -217,14 +220,23 @@ export async function POST(req) {
       if (error) throw new Error(error.message);
       leads.push(row);
       created.push(row.name);
+      alerts.push({ title: `New enquiry: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "From an email"}`, tag: `lead-${row.id}`, url: "/" });
       console.log("inbox: new lead added from an enquiry email");
     }
 
     if (canRemember) {
       await supabaseAdmin.from("settings").update({ inboxCursor: startedAt.toISOString() }).eq("id", settings.id);
     }
+    // phone alerts (no-ops until the VAPID keys are set): the new ones straight away, then reminders for hipages leads nobody has replied to
+    let alerted = 0;
+    try {
+      for (const a of alerts) alerted += (await sendPush(supabaseAdmin, a)).sent;
+      await nudgeUnanswered(supabaseAdmin);
+    } catch (e) {
+      console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
+    }
     lastRun = Date.now();
-    return NextResponse.json({ configured: true, checked: emails.length, created: created.length, updated: updated.length, names: created, changes: updated, alreadyHave, unreadable, remembers: canRemember });
+    return NextResponse.json({ configured: true, alerted, checked: emails.length, created: created.length, updated: updated.length, names: created, changes: updated, alreadyHave, unreadable, remembers: canRemember });
   } catch (e) {
     lastRun = Date.now();
     const msg = String(e?.message || e);

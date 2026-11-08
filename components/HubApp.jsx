@@ -40,6 +40,9 @@ import FinanceBreakdown from "./FinanceBreakdown";
 import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary, projectedOf } from "@/lib/finances";
 import { labourLines, isLabourRow } from "@/lib/labourInvoice";
 import { isSystemRow, textLinkStatus } from "@/lib/systemRows";
+import { isSupplierRow, supplierInvoices } from "@/lib/supplierInvoice";
+import SupplierInvoices from "./SupplierInvoices";
+import PushAlerts from "./PushAlerts";
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
 // It starts at the day Artie got back to Australia.
@@ -604,7 +607,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   // ----- money: what's come in and gone out so far, and what the booked jobs should make (same numbers as the Finances tab) -----
   const [moneyFrom] = useFinancesFrom();
   const moneyJobs = useMemo(
-    () => jobsSince(buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), today: t }), moneyFrom),
+    () => jobsSince(buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: t }), moneyFrom),
     [quotes, invoices, materials, expenses, moneyFrom, t]
   );
   const actual = useMemo(() => totalsOf(moneyJobs), [moneyJobs]);
@@ -834,6 +837,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       </div>
 
       <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
+
+      <PushAlerts />
 
       <div className="panel">
         <div className="panel-head"><Smartphone size={16} /><span>Texts from your phone</span></div>
@@ -2583,8 +2588,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
   // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
   const todayIso = today();
   const [from, chooseFrom] = useFinancesFrom();
-  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
-  const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e) && !isSystemRow(e)), [expenses]);
+  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
+  const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e) && !isSystemRow(e) && !isSupplierRow(e)), [expenses]);
   const jobs = useMemo(() => jobsSince(allJobs, from), [allJobs, from]);
   const booked = useMemo(() => bookedSummary(jobs), [jobs]);
   const totals = useMemo(() => totalsOf(jobs), [jobs]);
@@ -2681,6 +2686,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
           ))}
         </div>
       </details>
+
+      <SupplierInvoices jobs={allJobs} expenses={expenses} setExpenses={setExpenses} />
 
       {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} since={from} onClose={() => setBreakdown(null)} />}
 
@@ -3987,7 +3994,14 @@ export default function HubApp() {
     if (opts?.open) setPendingOpen(opts.open);
   };
 
-  const bumpDocNumber = () => setSettings((s) => ({ ...s, nextDocNumber: (Number(s.nextDocNumber) || 458) + 1 }));
+  // The next quote/invoice number is the saved counter, but never one that's already in use: an out-of-date copy of the hub
+  // (an old tab or phone) can save an old counter over the real one, so it's also kept above the highest LFS number there is.
+  const maxDocNumber = useMemo(
+    () => Math.max(0, ...[...quotes, ...invoices].map((d) => Number(String(d.docNumber || "").match(/^LFS(\d+)/i)?.[1]) || 0)),
+    [quotes, invoices]
+  );
+  const docSettings = useMemo(() => ({ ...settings, nextDocNumber: Math.max(Number(settings.nextDocNumber) || 458, maxDocNumber + 1) }), [settings, maxDocNumber]);
+  const bumpDocNumber = () => setSettings((s) => ({ ...s, nextDocNumber: Math.max(Number(s.nextDocNumber) || 458, maxDocNumber + 1) + 1 }));
 
   const handleExportData = () => {
     const payload = { exportedAt: new Date().toISOString(), leads, quotes, invoices, materials, expenses, settings };
@@ -4062,8 +4076,8 @@ export default function HubApp() {
             {tab === "leads" && <Leads leads={leads} quotes={quotes} setLeads={setLeads} go={go} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={settings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
-            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={settings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
+            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={docSettings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
+            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} />}

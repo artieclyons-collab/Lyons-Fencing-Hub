@@ -60,7 +60,7 @@ export default function FinanceBreakdown({ metric, jobs, weeks, totals, since, o
             <div className="calc-row"><span>Paid so far</span><span>{money(j.paid)}</span></div>
             {j.owing > 0 && <div className="calc-row"><span>Still owing</span><span>{money(j.owing)}</span></div>}
             <div className="calc-row">
-              <span>Estimated materials{j.started ? "" : " (not counted until the job starts)"}</span>
+              <span>{j.materialsActual ? `Materials, paid to suppliers (${j.supplierInvoices.length} ${j.supplierInvoices.length === 1 ? "invoice" : "invoices"})` : `Estimated materials${j.started ? "" : " (not counted until the job starts)"}`}</span>
               <span>{j.materials > 0 ? money(j.materials) : "none saved"}</span>
             </div>
             <div className="calc-row">
