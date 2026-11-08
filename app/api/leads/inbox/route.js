@@ -18,7 +18,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
-import { sendPush, nudgeUnanswered } from "@/lib/push";
+import { sendPush, nudgeUnanswered, dailyTextsDigest } from "@/lib/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -232,6 +232,7 @@ export async function POST(req) {
     try {
       for (const a of alerts) alerted += (await sendPush(supabaseAdmin, a)).sent;
       await nudgeUnanswered(supabaseAdmin);
+      await dailyTextsDigest(supabaseAdmin);
     } catch (e) {
       console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
     }
