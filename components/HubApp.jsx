@@ -4042,13 +4042,13 @@ export default function HubApp() {
         </div>
       )}
       <header className="topbar">
-        <div className="brand">
+        <button type="button" className="brand brand-home" onClick={() => { setTab("dashboard"); window.scrollTo({ top: 0 }); }} aria-label="Home" title="Back to the Board">
           <div className="brand-mark">LF</div>
           <div>
             <div className="brand-name">Lyons Fencing & Services</div>
             <div className="brand-sub">Business hub</div>
           </div>
-        </div>
+        </button>
         <button className="icon-btn settings-btn undo-btn" onClick={() => setTrashOpen(true)} title="Recently deleted — put things back">
           <Undo2 size={18} />
           {trash.length > 0 && <span className="undo-count">{trash.length > 9 ? "9+" : trash.length}</span>}
