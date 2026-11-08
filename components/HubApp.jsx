@@ -2024,7 +2024,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
           prefill={scanPrefill}
           quoteSections={sectionsFromQuote(form)}
           quoteDefaults={{
-            style: form.jobType === "Aluminium fencing" ? "aluminium" : form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : undefined,
+            style: form.jobType === "Aluminium fencing" ? "aluminium" : form.jobType === "Colorbond" ? "colorbond" : form.jobType === "Timber fencing" ? "timber" : form.jobType === "Chain wire fencing" ? "chainwire" : undefined,
             slatWidth: materialsInputs(form).slatWidth,
             gateWidth: materialsInputs(form).gateWidth,
             holeDepth: materialsInputs(form).holeDepth,
