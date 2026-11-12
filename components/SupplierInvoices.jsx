@@ -6,7 +6,7 @@ import { Camera, X, Trash2, Check } from "lucide-react";
 import { money, today } from "@/lib/logic";
 import { readSupplierInvoice } from "@/lib/ai";
 import { suggestJobs, shortDate } from "@/lib/finances";
-import { isSupplierRow, supplierFromRow, supplierRow } from "@/lib/supplierInvoice";
+import { isSupplierRow, supplierFromRow, supplierRow, isPendingRow, pendingFromRow } from "@/lib/supplierInvoice";
 
 const blankDoc = () => ({ supplier: "", invoiceNumber: "", date: today(), deliveryAddress: "", deliveryIncGst: 0, lines: [], totalIncGst: "", isOrderOnly: false });
 const jobLabel = (j) => `${j.name}${j.docNumber ? ` ${j.docNumber}` : ""}${j.address ? ` · ${j.address}` : ""}`;
@@ -24,6 +24,24 @@ export default function SupplierInvoices({ jobs, expenses, setExpenses }) {
     [expenses]
   );
   const savedTotal = saved.reduce((s, x) => s + x.doc.total, 0);
+
+  // Invoices that arrived by email and were read automatically: they wait here until you've checked them and picked the job.
+  const pending = useMemo(
+    () => expenses.filter(isPendingRow).map(pendingFromRow).filter(Boolean).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt))),
+    [expenses]
+  );
+  const [picks, setPicks] = useState({}); // waiting invoice id -> the job you picked
+  const suggestFor = (p) => {
+    const sugg = suggestJobs(jobs, p.doc.deliveryAddress);
+    return sugg.length === 1 ? sugg[0].quote.id : "";
+  };
+  const addPending = (p) => {
+    const row = supplierRow({ ...p.doc, quoteId: picks[p.id] ?? suggestFor(p) });
+    setExpenses((es) => [row, ...es.filter((e) => e.id !== row.id && e.id !== p.id)]);
+  };
+  const skipPending = (p) => {
+    if (window.confirm(`Skip this ${p.doc.supplier || "supplier"} invoice (${money(p.doc.totalIncGst)})? It won't be added to any job.`)) setExpenses((es) => es.filter((e) => e.id !== p.id));
+  };
 
   const onFiles = async (e) => {
     const files = [...(e.target.files || [])];
@@ -74,6 +92,31 @@ export default function SupplierInvoices({ jobs, expenses, setExpenses }) {
         <span className="calc-note" style={{ margin: 0 }}>A photo, screenshot or PDF from Our Town, Bunnings or anyone. Pick the job and its materials cost becomes what you really paid.</span>
       </div>
       {error && <p className="calc-note" style={{ color: "var(--bad)" }}>{error}</p>}
+
+      {pending.length > 0 && (
+        <div className="calc-preview" style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>From your email, check these ({pending.length})</div>
+          {pending.map((p) => (
+            <div key={p.id} className="fin-item" style={{ paddingBottom: 8 }}>
+              <div className="fin-row" style={{ cursor: "default", flexWrap: "wrap" }}>
+                <div className="fin-main">
+                  <div className="fin-title">{p.doc.supplier || p.from || "Supplier"}{p.doc.invoiceNumber ? <span className="fin-doc"> {p.doc.invoiceNumber}</span> : ""}</div>
+                  <div className="fin-meta">{p.doc.date ? shortDate(p.doc.date) : ""}{p.doc.deliveryAddress ? ` · ${p.doc.deliveryAddress}` : ""} · {p.doc.lines.length} {p.doc.lines.length === 1 ? "line" : "lines"}</div>
+                </div>
+                <div className="fin-amt bad">{money(p.doc.totalIncGst)}</div>
+                <select className="search-filter" style={{ width: "100%" }} value={picks[p.id] ?? suggestFor(p)} onChange={(e) => setPicks((x) => ({ ...x, [p.id]: e.target.value }))} aria-label="Job">
+                  <option value="">Job: match by delivery address</option>
+                  {options.map((j) => <option key={j.key} value={j.quote.id}>{jobLabel(j)}</option>)}
+                </select>
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button className="btn-primary small" onClick={() => addPending(p)}><Check size={13} /> Add to job</button>
+                  <button className="btn-ghost small" onClick={() => skipPending(p)}>Skip</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {saved.length > 0 && (
         <details style={{ marginTop: 10 }}>

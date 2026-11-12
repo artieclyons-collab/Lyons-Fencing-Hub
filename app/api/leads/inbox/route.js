@@ -20,6 +20,7 @@ import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, nudgeUnanswered, dailyTextsDigest } from "@/lib/push";
 import { foldUpdate } from "@/lib/noteSummary";
+import { attachmentsOf, looksLikeSupplierMail, importSupplierMails } from "@/lib/supplierMail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ const OVERLAP_MS = 10 * 60 * 1000; // re-read the last few minutes each time, so
 const MIN_GAP_MS = 30 * 1000;
 const MAX_LISTED = 80; // newest emails looked at per check
 const MAX_DOWNLOADED = 20; // of those, the ones worth reading in full
+const MAX_SUPPLIER_MAILS = 6; // supplier invoice emails read per check
 const tail = (s) => String(s || "").replace(/\D/g, "").slice(-9);
 
 const sameOrigin = (req) => {
@@ -56,7 +58,7 @@ let lastRun = 0;
 
 // New emails worth acting on -> [{ kind: "hipages"|"client", messageId, receivedAt, subject, text, display, address, headers }]
 // `keep(summary)` decides, from the envelope and headers alone, which ones are downloaded in full.
-async function fetchEmails(since, keep) {
+async function fetchEmails(since, keep, seenSupplier = new Set()) {
   const client = new ImapFlow({
     host: process.env.IMAP_HOST || "imap.gmail.com",
     port: Number(process.env.IMAP_PORT) || 993,
@@ -66,6 +68,7 @@ async function fetchEmails(since, keep) {
     socketTimeout: 40000,
   });
   const found = [];
+  const supplierMails = [];
   await client.connect();
   try {
     const lock = await client.getMailboxLock("INBOX", { readOnly: true });
@@ -73,9 +76,9 @@ async function fetchEmails(since, keep) {
       const uids = (await client.search({ since: new Date(since.getTime() - 24 * 3600 * 1000) }, { uid: true })) || [];
       // First pass: just who it's from, the subject and a few headers (cheap).
       const listed = [];
-      const wanted = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "in-reply-to", "references"];
+      const wanted = ["list-unsubscribe", "list-id", "precedence", "auto-submitted", "in-reply-to", "references", "message-id"];
       if (uids.length) {
-        for await (const m of client.fetch(uids.slice(-MAX_LISTED).join(","), { uid: true, envelope: true, internalDate: true, headers: wanted }, { uid: true })) {
+        for await (const m of client.fetch(uids.slice(-MAX_LISTED).join(","), { uid: true, envelope: true, internalDate: true, headers: wanted, bodyStructure: true }, { uid: true })) {
           const from = m.envelope?.from?.[0] || {};
           listed.push({
             uid: m.uid,
@@ -84,6 +87,7 @@ async function fetchEmails(since, keep) {
             display: from.name || "",
             address: from.address || "",
             headers: headerMap(m.headers ? m.headers.toString("utf8") : ""),
+            attachments: attachmentsOf(m.bodyStructure),
           });
         }
       }
@@ -91,8 +95,27 @@ async function fetchEmails(since, keep) {
       const candidates = listed
         .filter((s) => s.receivedAt > since)
         .map((s) => ({ ...s, kind: classify({ address: s.address, subject: s.subject, headers: s.headers, self: process.env.GMAIL_USER }) }))
+        .filter((s) => !looksLikeSupplierMail(s)) // a supplier invoice is never a lead
         .filter((s) => s.kind && (s.kind === "hipages" ? isJobDetails({ from: s.address, subject: s.subject }) : keep(s)))
         .slice(-MAX_DOWNLOADED);
+      // Supplier invoices and receipts (a PDF or photo from Our Town, Bunnings...): downloaded separately, once each.
+      const supKey = (s) => s.headers["message-id"] || `uid${s.uid}`;
+      const supplierCandidates = listed.filter((s) => s.receivedAt > since && looksLikeSupplierMail(s) && !seenSupplier.has(supKey(s))).slice(-MAX_SUPPLIER_MAILS);
+      for (const s of supplierCandidates) {
+       try {
+        const msg = await client.fetchOne(String(s.uid), { source: true }, { uid: true });
+        if (!msg?.source) continue;
+        const mail = await simpleParser(msg.source);
+        if (/\bdmarc=fail\b/i.test(String(mail.headers?.get("authentication-results") || ""))) continue;
+        const attachments = (mail.attachments || [])
+          .filter((a) => /^(?:application\/pdf|image\/(?:jpeg|jpg|png|heic|heif|webp))$/i.test(a.contentType || "") && a.size <= 6 * 1024 * 1024 && (/pdf/i.test(a.contentType) || a.size > 30000))
+          .slice(0, 4)
+          .map((a) => ({ filename: a.filename || "", mediaType: a.contentType, base64: a.content.toString("base64") }));
+        if (attachments.length) supplierMails.push({ key: supKey(s), messageId: mail.messageId || `uid${s.uid}`, subject: s.subject, display: s.display, address: s.address, receivedAt: s.receivedAt, attachments });
+       } catch (e) {
+        console.log("inbox: a supplier email couldn't be downloaded —", String(e?.message || e).slice(0, 100)); // never lets this hold up the leads
+       }
+      }
       for (const s of candidates) {
         const msg = await client.fetchOne(String(s.uid), { source: true }, { uid: true });
         if (!msg?.source) continue;
@@ -108,6 +131,7 @@ async function fetchEmails(since, keep) {
   } finally {
     await client.logout().catch(() => {});
   }
+  found.supplier = supplierMails;
   return found;
 }
 
@@ -165,7 +189,12 @@ export async function POST(req) {
     }
     // A reply is worth reading when it's from a known address, from someone whose name is a lead or a client (they may be writing from
     // an address the hub never saw, like a quote that was emailed before the hub did it), or it's a reply to one of your own quote emails.
-    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()) || nameKeys(s.display).some((k) => knownNames.has(k)) || /lyons fencing/i.test(s.subject));
+    // supplier-invoice emails already looked at (kept in one small row, newest 300), so a re-read never pays Claude twice for the same email
+    const SUP_SEEN_ID = "sys-seen-sup";
+    const { data: supSeenRow } = await supabaseAdmin.from("expenses").select("description").eq("id", SUP_SEEN_ID).maybeSingle();
+    let supSeenList = [];
+    try { supSeenList = JSON.parse(supSeenRow?.description || "[]") || []; } catch { supSeenList = []; }
+    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()) || nameKeys(s.display).some((k) => knownNames.has(k)) || /lyons fencing/i.test(s.subject), new Set(supSeenList));
     let quotesCache = null; // loaded only if an email sounds like an acceptance or a decline
     const loadQuotes = async () => {
       if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date")).data || [];
@@ -264,6 +293,22 @@ export async function POST(req) {
       console.log("inbox: new lead added from an enquiry email");
     }
 
+    // supplier invoices from email: read, and queued on the Finances tab for you to check
+    let supplierQueued = 0;
+    const supplierMails = emails.supplier || [];
+    if (supplierMails.length) {
+      try {
+        const r = await importSupplierMails(supabaseAdmin, supplierMails);
+        if (r.handled.length) {
+          supSeenList.push(...r.handled);
+          await supabaseAdmin.from("expenses").upsert({ id: SUP_SEEN_ID, category: "System", description: JSON.stringify(supSeenList.slice(-300)), amount: "0", date: new Date().toISOString().slice(0, 10) });
+        }
+        supplierQueued = r.queued.length;
+        for (const q of r.queued) alerts.push({ title: `Supplier invoice to check: ${q.supplier}`, body: `$${Number(q.total).toFixed(2)}. Open Finances and pick the job it was for.`, tag: `sup-${Math.round(q.total * 100)}`, url: "/" });
+      } catch (e) {
+        console.log("inbox: supplier invoices couldn't be imported —", String(e?.message || e).slice(0, 100));
+      }
+    }
     if (seenChanged) await supabaseAdmin.from("expenses").upsert({ id: SEEN_ID, category: "System", description: JSON.stringify(seenList.slice(-300)), amount: "0", date: new Date().toISOString().slice(0, 10) });
     if (canRemember) {
       await supabaseAdmin.from("settings").update({ inboxCursor: startedAt.toISOString() }).eq("id", settings.id);
@@ -278,7 +323,7 @@ export async function POST(req) {
       console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
     }
     lastRun = Date.now();
-    return NextResponse.json({ configured: true, alerted, checked: emails.length, created: created.length, updated: updated.length, names: created, changes: updated, alreadyHave, unreadable, remembers: canRemember });
+    return NextResponse.json({ configured: true, alerted, supplierQueued, checked: emails.length, created: created.length, updated: updated.length, names: created, changes: updated, alreadyHave, unreadable, remembers: canRemember });
   } catch (e) {
     lastRun = Date.now();
     const msg = String(e?.message || e);
