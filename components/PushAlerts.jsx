@@ -15,6 +15,7 @@ export default function PushAlerts() {
   const [publicKey, setPublicKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [timerLast, setTimerLast] = useState(undefined); // when the outside timer last checked the inbox ("" = never)
 
   useEffect(() => {
     (async () => {
@@ -27,6 +28,7 @@ export default function PushAlerts() {
       const r = await fetch("/api/push/subscribe", { cache: "no-store" }).then((x) => x.json()).catch(() => ({}));
       if (!r.configured) { setState("notConfigured"); return; }
       setPublicKey(r.publicKey);
+      setTimerLast(r.timerLast || "");
       if (Notification.permission === "denied") { setState("blocked"); return; }
       const reg = await navigator.serviceWorker.getRegistration("/");
       const sub = reg ? await reg.pushManager.getSubscription() : null;
@@ -87,6 +89,15 @@ export default function PushAlerts() {
         {state === "on" && <><button className="btn-ghost small" onClick={test} disabled={busy}><Check size={13} /> Send a test</button><button className="btn-ghost small" onClick={turnOff} disabled={busy}>Turn off</button></>}
       </div>
       {msg && <p className="calc-note" style={{ marginBottom: 0 }}>{msg}</p>}
+      {timerLast !== undefined && (() => {
+        const mins = timerLast ? Math.round((Date.now() - new Date(timerLast).getTime()) / 60000) : null;
+        if (mins !== null && mins <= 20) return <p className="calc-note" style={{ marginBottom: 0 }}><Check size={12} style={{ verticalAlign: "-2px" }} /> Inbox timer is running: the inbox was checked {mins <= 1 ? "just now" : `${mins} minutes ago`}, so alerts arrive even when the hub is closed.</p>;
+        return (
+          <p className="calc-note" style={{ marginBottom: 0, color: "var(--hivis)" }}>
+            To do: set up the inbox timer. {mins === null ? "It isn't set up yet" : "It has stopped checking"}, so new-lead alerts and the morning "people to text" alert only come while the hub is open. Free, about 5 minutes at cron-job.org: POST to /api/leads/inbox every 5 minutes with your x-api-key header. This note goes away on its own once it's running.
+          </p>
+        );
+      })()}
     </div>
   );
 }

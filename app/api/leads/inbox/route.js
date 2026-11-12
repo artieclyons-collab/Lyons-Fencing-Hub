@@ -19,6 +19,7 @@ import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, nudgeUnanswered, dailyTextsDigest } from "@/lib/push";
+import { foldUpdate } from "@/lib/noteSummary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,6 +119,8 @@ export async function POST(req) {
   if (!sameOrigin(req) && !hasKey(req)) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   if (!configured()) return NextResponse.json({ configured: false });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database not configured" }, { status: 501 });
+  // remember that the outside timer (cron-job.org) is calling, so the Board can say whether it's set up
+  if (hasKey(req)) await supabaseAdmin.from("expenses").upsert({ id: "sys-timer", category: "System", description: JSON.stringify({ last: new Date().toISOString() }), amount: "0", date: new Date().toISOString().slice(0, 10) });
   if (running || Date.now() - lastRun < MIN_GAP_MS) return NextResponse.json({ configured: true, skipped: true });
   running = true;
   const startedAt = new Date();
@@ -150,6 +153,13 @@ export async function POST(req) {
       if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date")).data || [];
       return quotesCache;
     };
+    // emails already folded into a lead's notes (kept in one small row, newest 300), so a re-read never folds the same email twice
+    const SEEN_ID = "sys-folded";
+    const { data: seenRow } = await supabaseAdmin.from("expenses").select("description").eq("id", SEEN_ID).maybeSingle();
+    let seenList = [];
+    try { seenList = JSON.parse(seenRow?.description || "[]") || []; } catch { seenList = []; }
+    const seenSet = new Set(seenList);
+    let seenChanged = false;
     const created = [];
     const updated = [];
     const alerts = []; // phone alerts to send once the inbox has been read
@@ -185,6 +195,18 @@ export async function POST(req) {
         if (!change && !dec) continue;
         const patch = { ...(change?.patch || {}) };
         const applied = [...(change?.applied || [])];
+        if (change?.fold) {
+          const mid = String(e.messageId || `${lead.id}-${e.receivedAt?.getTime?.() || ""}-${change.fold.text.slice(0, 30)}`);
+          if (!seenSet.has(mid)) {
+            seenSet.add(mid);
+            seenList.push(mid);
+            seenChanged = true;
+            const base = patch.notes ?? String(lead.notes || "");
+            const folded = await foldUpdate(base, change.fold);
+            if (folded !== base) { patch.notes = folded.slice(-4000); applied.push("details"); }
+          }
+        }
+        if (!applied.length && !dec) continue;
         if (dec) {
           patch.status = dec.leadPatch.status;
           patch.notes = [patch.notes ?? String(lead.notes || ""), dec.noteLine].filter((x) => String(x).trim()).join("\n").slice(-4000);
@@ -224,6 +246,7 @@ export async function POST(req) {
       console.log("inbox: new lead added from an enquiry email");
     }
 
+    if (seenChanged) await supabaseAdmin.from("expenses").upsert({ id: SEEN_ID, category: "System", description: JSON.stringify(seenList.slice(-300)), amount: "0", date: new Date().toISOString().slice(0, 10) });
     if (canRemember) {
       await supabaseAdmin.from("settings").update({ inboxCursor: startedAt.toISOString() }).eq("id", settings.id);
     }

@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseAvailability, parseNotesAvailability, withAvailability, detectCancellation } from "@/lib/availability";
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
+import { foldUpdate } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
@@ -196,11 +197,14 @@ export async function POST(req) {
 
   // Anything else worth keeping (a new detail, a change, access info) as a short record, not the whole message.
   if (!decided && !applied.some((a) => /cancellation|move the visit/.test(a))) {
+    // Folded into one running "Updates" line (see lib/noteSummary.js), not added as a line of its own.
     const rel = relevantParts(text, { max: 320 });
-    const seen = rel ? rel.replace(/\s+/g, " ").trim().slice(0, 50) : "";
-    if (rel && !existing.replace(/\s+/g, " ").includes(seen) && !notes.replace(/\s+/g, " ").includes(seen)) {
-      notes = [notes.trim(), `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`].filter(Boolean).join("\n");
-      applied.push("details");
+    if (rel) {
+      const folded = await foldUpdate(notes, { text: rel, when: stamp().split(" ").slice(0, 2).join(" ") });
+      if (folded !== notes) {
+        notes = folded;
+        applied.push("details");
+      }
     }
   }
 

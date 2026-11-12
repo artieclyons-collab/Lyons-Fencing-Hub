@@ -8,7 +8,7 @@ import {
   LayoutGrid, Users, FileText, Receipt, Boxes, Wallet,
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
-  ShoppingCart, Share2, Copy, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
+  ShoppingCart, Share2, Copy, Scissors, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
   Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical,
 } from "lucide-react";
 
@@ -42,6 +42,8 @@ import { labourLines, isLabourRow } from "@/lib/labourInvoice";
 import { isSystemRow, textLinkStatus } from "@/lib/systemRows";
 import { isSupplierRow, supplierInvoices } from "@/lib/supplierInvoice";
 import SupplierInvoices from "./SupplierInvoices";
+import SplitModal from "./SplitModal";
+import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
@@ -1362,6 +1364,14 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
     });
   };
 
+  // Two neighbours sharing a fence: the quote on screen is halved and a new draft quote is made for the neighbour (lib/splitDoc.js).
+  const split = (form, neighbour) => {
+    const { mine, theirs } = splitQuote(form, neighbour, { id: uid(), docNumber: previewNumber(), today: today(), newId: uid });
+    bumpDocNumber();
+    setQuotes((qs) => [theirs, ...qs.map((q) => (q.id === mine.id ? mine : q))]);
+    setModal(null);
+  };
+
   const openFinalInvoice = (q) => {
     setModal(null);
     setFinalInvoiceQuote(q);
@@ -1541,6 +1551,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
           onSkip={modal.data?._batch && queue.length > 0 ? () => openNextInQueue(false) : null}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onDuplicate={modal.data?.id ? duplicate : null}
+          onSplit={modal.data?.id ? split : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={saveAndCreateDeposit}
           allQuotes={quotes}
@@ -1594,11 +1605,12 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
+function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onSplit, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [scanPrefill, setScanPrefill] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -2048,6 +2060,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {onDuplicate && <button className="btn-ghost" onClick={() => onDuplicate(form)}><Copy size={15} /> Duplicate</button>}
+        {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this quote and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
@@ -2059,6 +2072,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
       )}
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
+      {splitting && <SplitModal kind="quote" doc={form} number={`LFS${settings?.nextDocNumber || 458}`} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
       {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} />}
     </Modal>
   );
@@ -2087,6 +2101,13 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
     setModal(null);
   };
   const remove = (id) => setInvoices((is) => is.filter((i) => i.id !== id));
+  // Two neighbours sharing a fence: the invoice on screen is halved and a new unpaid invoice is made for the neighbour (lib/splitDoc.js).
+  const split = (form, neighbour) => {
+    const { mine, theirs } = splitInvoice(form, neighbour, { id: uid(), docNumber: previewNumber(), today: today(), newId: uid });
+    bumpDocNumber();
+    setInvoices((is) => [theirs, ...is.map((i) => (i.id === mine.id ? mine : i))]);
+    setModal(null);
+  };
   const markPaid = (inv) => setInvoices((is) => is.map((i) => (i.id === inv.id ? { ...i, status: "Paid", paidDate: today() } : i)));
 
   const effectiveStatus = (i) => (i.status === "Unpaid" && i.dueDate && i.dueDate < today() ? "Overdue" : i.status);
@@ -2148,6 +2169,8 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onMarkPaid={modal.data?.id && modal.data.status !== "Paid" ? () => { markPaid(modal.data); setModal(null); } : null}
           onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
+          onSplit={modal.data?.id && modal.data.status !== "Paid" ? split : null}
+          nextNumber={previewNumber()}
         />
       )}
       {showLabour && <LabourInvoice addresses={jobAddresses} expenses={expenses} setExpenses={setExpenses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
@@ -2156,8 +2179,9 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
   );
 }
 
-function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist }) {
+function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber }) {
   const [showEmail, setShowEmail] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
   const [lookingUpSuburb, setLookingUpSuburb] = useState(false);
@@ -2228,6 +2252,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {onMarkPaid && <button className="btn-ghost" onClick={onMarkPaid}><Check size={15} /> Mark paid</button>}
+        {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this invoice and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         {initial?.id && <button className="btn-ghost" onClick={openEmail} title="Saves your changes, then emails the invoice with the PDF attached"><Mail size={15} /> Email invoice</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
@@ -2235,6 +2260,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
 
       {showPreview && <DocumentPreviewModal type="invoice" data={form} onClose={() => setShowPreview(false)} />}
       {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} />}
+      {splitting && <SplitModal kind="invoice" doc={form} number={nextNumber} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
     </Modal>
   );
 }

@@ -17,7 +17,12 @@ const sameOrigin = (req) => {
 const idFor = (endpoint) => `push-${crypto.createHash("sha1").update(endpoint).digest("hex").slice(0, 20)}`;
 
 export async function GET() {
-  return NextResponse.json({ configured: pushConfigured() && !!supabaseAdmin, publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || "" }, { headers: { "Cache-Control": "no-store" } });
+  let timerLast = "";
+  if (supabaseAdmin) {
+    const { data } = await supabaseAdmin.from("expenses").select("description").eq("id", "sys-timer").maybeSingle();
+    try { timerLast = JSON.parse(data?.description || "{}").last || ""; } catch { timerLast = ""; }
+  }
+  return NextResponse.json({ configured: pushConfigured() && !!supabaseAdmin, publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || process.env.VAPID_PUBLIC_KEY || "", timerLast }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(req) {
