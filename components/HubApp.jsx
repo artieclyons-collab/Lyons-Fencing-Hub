@@ -1983,10 +1983,10 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         {routeError && <p className="calc-note" style={{ color: "var(--bad)" }}>{routeError}</p>}
         <p className="calc-note" style={{ marginTop: -6, marginBottom: 10 }}>
           {form.jobType === "Colorbond"
-            ? "Estimates the full loop: home (Tugun) → job → tip (Reedy Creek) → materials (Yatala) → job → home."
+            ? "Estimates the full loop: home (Burleigh) → job → tip (Reedy Creek) → materials (Our Town, Yatala) → job → home."
             : form.jobType === "Timber fencing"
-            ? "Estimates the full loop: home (Tugun) → job → tip (Reedy Creek) → materials (Bunnings Burleigh) → job → home."
-            : "Estimates a simple return trip from home (Tugun) to the job."}
+            ? "Estimates the full loop: home (Burleigh) → job → tip (Reedy Creek) → materials (Bunnings Burleigh) → job → home."
+            : "Estimates a simple return trip from home (Burleigh) to the job."}
         </p>
         <div className="field-pair">
           <Field label="Employees (labourer)"><input type="number" value={form.employees ?? ""} onChange={(e) => set("employees", e.target.value)} placeholder="1" /></Field>
