@@ -111,8 +111,26 @@ async function fetchEmails(since, keep) {
   return found;
 }
 
-export async function GET() {
-  return NextResponse.json({ configured: configured() && !!supabaseAdmin }, NO_STORE);
+export async function GET(req) {
+  const base = { configured: configured() && !!supabaseAdmin, aiKeySet: !!process.env.ANTHROPIC_API_KEY };
+  // ?ai=check (only with the x-api-key header): a tiny test call to each Claude model the hub uses, so a wrong model name or a bad key shows up
+  if (new URL(req.url).searchParams.get("ai") === "check" && hasKey(req)) {
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const results = {};
+    if (process.env.ANTHROPIC_API_KEY) {
+      const client = new Anthropic({ timeout: 20000, maxRetries: 0 });
+      for (const model of ["claude-haiku-5-5", "claude-sonnet-4-6"]) {
+        try {
+          await client.messages.create({ model, max_tokens: 5, messages: [{ role: "user", content: "Reply with ok" }] });
+          results[model] = "ok";
+        } catch (e) {
+          results[model] = `${e?.status || ""} ${String(e?.message || e).slice(0, 140)}`.trim();
+        }
+      }
+    }
+    return NextResponse.json({ ...base, results }, NO_STORE);
+  }
+  return NextResponse.json(base, NO_STORE);
 }
 
 export async function POST(req) {
