@@ -35,8 +35,11 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
   const markContacted = (lead) => setLeads?.((ls) => ls.map((l) => (l.id === lead.id && l.status === "New" ? { ...l, status: "Contacted" } : l)));
   const markDone = (item) => {
     if (item.kind === "lead") { markContacted(item.lead); setPending(null); return; }
-    const patch = (rows) => rows.map((r) => (r.id === item.id ? { ...r, [item.mark.field]: item.mark.value } : r));
-    if (item.kind === "invoice" || item.kind === "review") setInvoices(patch);
+    // the mark goes on the quote (a review asked for the whole job) or the invoice, as the item says
+    const targetId = item.mark.id || item.id;
+    const patch = (rows) => rows.map((r) => (r.id === targetId ? { ...r, [item.mark.field]: item.mark.value } : r));
+    const onInvoices = item.mark.table ? item.mark.table === "invoices" : item.kind === "invoice" || item.kind === "review";
+    if (onInvoices) setInvoices(patch);
     else setQuotes(patch);
     setPending(null);
   };
