@@ -20,7 +20,7 @@ import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, nudgeUnanswered, dailyTextsDigest } from "@/lib/push";
 import { foldUpdate } from "@/lib/noteSummary";
-import { attachmentsOf, looksLikeSupplierMail, importSupplierMails } from "@/lib/supplierMail";
+import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,7 +95,7 @@ async function fetchEmails(since, keep, seenSupplier = new Set()) {
       const candidates = listed
         .filter((s) => s.receivedAt > since)
         .map((s) => ({ ...s, kind: classify({ address: s.address, subject: s.subject, headers: s.headers, self: process.env.GMAIL_USER }) }))
-        .filter((s) => !looksLikeSupplierMail(s)) // a supplier invoice is never a lead
+        .filter((s) => !looksLikeSupplierMail(s) && !isSupplierSender(s)) // a supplier's email is never a lead
         .filter((s) => s.kind && (s.kind === "hipages" ? isJobDetails({ from: s.address, subject: s.subject }) : keep(s)))
         .slice(-MAX_DOWNLOADED);
       // Supplier invoices and receipts (a PDF or photo from Our Town, Bunnings...): downloaded separately, once each.
