@@ -43,6 +43,7 @@ import { isSystemRow, textLinkStatus } from "@/lib/systemRows";
 import { isSupplierRow, supplierInvoices } from "@/lib/supplierInvoice";
 import SupplierInvoices from "./SupplierInvoices";
 import SplitModal from "./SplitModal";
+import TextClientModal from "./TextClientModal";
 import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
 
@@ -978,6 +979,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
   );
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const [showText, setShowText] = useState(false);
+  const [textClient, setTextClient] = useState(false);
 
   return (
     <Modal title={initial ? "Edit lead" : "New lead"} onClose={onClose}>
@@ -1031,9 +1033,11 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
 
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
+        {String(form.phone || "").replace(/\D/g, "").length >= 8 && <button className="btn-ghost" onClick={() => setTextClient(true)}><Send size={15} /> Text</button>}
         {onQuote && <button className="btn-ghost" onClick={onQuote}><FileText size={15} /> Start quote</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.name}><Check size={15} /> Save</button>
       </div>
+      {textClient && <TextClientModal kind="lead" name={form.name} phone={form.phone} onClose={() => setTextClient(false)} />}
     </Modal>
   );
 }
@@ -1611,6 +1615,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
   const [showPreview, setShowPreview] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
   const [splitting, setSplitting] = useState(false);
+  const [textClient, setTextClient] = useState(false);
   const [scanPrefill, setScanPrefill] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -1710,11 +1715,13 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Old fence removal length defaults to the overall job length, kept in sync unless you type over it.
+  // Old fence removal length defaults to the overall job length (kept in sync unless you type over it), but only when the quote
+  // actually has a removal line: a "no removal" job shouldn't get removal (and tip costs) it never had.
+  const hasRemovalLine = (form.items || []).some((it) => /remov/i.test(it.desc || "") && !/vegetation/i.test(it.desc || ""));
   useEffect(() => {
-    if (form.jobLength) set("removalLength", form.jobLength);
+    if (form.jobLength) set("removalLength", hasRemovalLine ? form.jobLength : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.jobLength]);
+  }, [form.jobLength, hasRemovalLine]);
 
   const fuelCost = estFuelCost(form.distanceKm, settings);
   const labourRate = (LABOUR_RATES.find((r) => r.id === form.labourRateType) || LABOUR_RATES[0]).rate;
@@ -2065,6 +2072,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved quote with the PDF attached"><Mail size={15} /> Email quote</button>}
+        {initial?.id && <button className="btn-ghost" onClick={() => setTextClient(true)} title="Opens a ready-written text to their number in Messages"><Send size={15} /> Text client</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
       {linkFallback && (
@@ -2073,7 +2081,8 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
       {splitting && <SplitModal kind="quote" doc={form} number={`LFS${settings?.nextDocNumber || 458}`} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
-      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} />}
+      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} onText={String(form.clientPhone || "").replace(/\D/g, "").length >= 8 ? () => { setShowEmail(false); setTextClient(true); } : null} />}
+      {textClient && <TextClientModal kind="quote" name={form.clientName} phone={form.clientPhone} docNumber={form.docNumber} onClose={() => setTextClient(false)} />}
     </Modal>
   );
 }
@@ -2171,6 +2180,11 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
           onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
           onSplit={modal.data?.id && modal.data.status !== "Paid" ? split : null}
           nextNumber={previewNumber()}
+          phone={(() => {
+            const nm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            const q = (quotes || []).find((x) => x.id === modal.data?.quoteId) || (quotes || []).find((x) => x.clientPhone && nm(x.clientName) === nm(modal.data?.clientName));
+            return q?.clientPhone || "";
+          })()}
         />
       )}
       {showLabour && <LabourInvoice addresses={jobAddresses} expenses={expenses} setExpenses={setExpenses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
@@ -2179,8 +2193,9 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
   );
 }
 
-function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber }) {
+function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber, phone }) {
   const [showEmail, setShowEmail] = useState(false);
+  const [textClient, setTextClient] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
@@ -2255,11 +2270,13 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
         {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this invoice and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         {initial?.id && <button className="btn-ghost" onClick={openEmail} title="Saves your changes, then emails the invoice with the PDF attached"><Mail size={15} /> Email invoice</button>}
+        {initial?.id && <button className="btn-ghost" onClick={() => setTextClient(true)} title="Opens a ready-written text to their number in Messages"><Send size={15} /> Text client</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.clientName}><Check size={15} /> Save</button>
       </div>
 
       {showPreview && <DocumentPreviewModal type="invoice" data={form} onClose={() => setShowPreview(false)} />}
-      {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} />}
+      {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} onText={() => { setShowEmail(false); setTextClient(true); }} />}
+      {textClient && <TextClientModal kind="invoice" name={form.clientName} phone={phone} docNumber={form.docNumber} total={money(gstBreakdown(itemsTotal(form.items)).total)} deposit={isDepositInvoice(form)} onClose={() => setTextClient(false)} />}
       {splitting && <SplitModal kind="invoice" doc={form} number={nextNumber} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
     </Modal>
   );

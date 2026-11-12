@@ -12,7 +12,7 @@ async function api(body) {
 }
 
 // kind: quote | followup | start | invoice | chase. id: the saved quote or invoice.
-export default function EmailModal({ kind, id, title, onClose, onSent }) {
+export default function EmailModal({ kind, id, title, onClose, onSent, onText }) {
   const [state, setState] = useState("loading"); // loading | ready | sending | sent | error
   const [info, setInfo] = useState(null); // { to, from, subject, body, attachment, configured, name }
   const [subject, setSubject] = useState("");
@@ -159,7 +159,11 @@ export default function EmailModal({ kind, id, title, onClose, onSent }) {
             <>
               <p className="calc-note" style={{ color: "var(--good)" }}><Check size={14} style={{ verticalAlign: "-2px" }} /> {result?.test ? "Test mode: built the email but didn't send it." : `Sent to ${result?.to}.`} {(result?.marked || []).join(" ")}</p>
               {result?.attached?.length > 0 && <p className="calc-note">Attached: {result.attached.join(", ")}</p>}
-              <div className="modal-actions"><button className="btn-primary" onClick={onClose}><Check size={15} /> Done</button></div>
+              {onText && !result?.test && <p className="calc-note">Want to let them know by text too?</p>}
+              <div className="modal-actions">
+                {onText && !result?.test && <button className="btn-ghost" onClick={onText}><Send size={15} /> Text them to say it's sent</button>}
+                <button className="btn-primary" onClick={onClose}><Check size={15} /> Done</button>
+              </div>
             </>
           )}
         </div>
