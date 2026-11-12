@@ -44,6 +44,7 @@ import { isSupplierRow, supplierInvoices } from "@/lib/supplierInvoice";
 import SupplierInvoices from "./SupplierInvoices";
 import SplitModal from "./SplitModal";
 import TextClientModal from "./TextClientModal";
+import { isPalingQuote, palingSide, setPalingSide } from "@/lib/palingSide";
 import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
 
@@ -2023,7 +2024,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
           <button type="button" className="btn-primary small" onClick={() => {
             const suggested = suggestedNotes(form.jobType, form.jobLength, form.items);
             const existing = form.notes ? form.notes.split("\n").map((n) => n.trim()) : [];
-            const merged = [...existing, ...suggested.filter((s) => !existing.includes(s))];
+            const merged = [...existing, ...suggested.filter((s) => !existing.includes(s) && !(/^Palings side to be confirmed/.test(s) && palingSide(form.notes)))];
             set("notes", merged.join("\n"));
           }}>
             <Plus size={14} /> Insert standard notes for this job
@@ -2034,6 +2035,17 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
             <button type="button" key={s} className="btn-ghost small" onClick={() => addNote(s)}>+ {s.split(":")[0].slice(0, 22)}…</button>
           ))}
         </div>
+        {isPalingQuote(form) && (
+          <label className="field" style={{ marginBottom: 8 }}>
+            <span>Which side do the palings face? (it goes on the quote)</span>
+            <select value={palingSide(form.notes)} onChange={(e) => set("notes", setPalingSide(form.notes, e.target.value))}>
+              <option value="">Not on the quote</option>
+              <option value="unconfirmed">Not confirmed yet: the client is asked to confirm</option>
+              <option value="client">The client's side</option>
+              <option value="neighbour">The neighbour's side</option>
+            </select>
+          </label>
+        )}
         <textarea rows={4} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Job-specific notes — tap a snippet above or type your own" />
       </Field>
 

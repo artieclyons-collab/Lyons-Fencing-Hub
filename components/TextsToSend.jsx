@@ -72,7 +72,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
           <div className="upcoming-date">{item.badge}</div>
           <div className="text-main">
             <div className="upcoming-name">{item.who}</div>
-            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "review" ? "Review request" : item.kind === "job" ? "Booked job" : item.kind === "lead" ? "New hipages lead" : "Quote"} · {item.what}</div>
+            <div className="upcoming-sub">{item.kind === "invoice" ? "Invoice" : item.kind === "review" ? "Review request" : item.kind === "job" ? "Booked job" : item.kind === "ask" ? "Before the job starts" : item.kind === "lead" ? "New hipages lead" : "Quote"} · {item.what}</div>
             {pending === item.key ? (
               <div className="text-confirm">
                 Did you send it?
