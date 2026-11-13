@@ -319,3 +319,5 @@ The iPhone Shortcut sends a saved contact's NAME, not their number, so a text fr
 - **Start quote** in the lead window now saves the lead (with anything you've just typed in the notes) first, and builds the quote from what's on screen, not from the last saved version.
 - **A lead made for an existing client** (a text from someone with quotes but no lead) now takes the newest email and street address from their quotes AND invoices (`clientFromQuotes(quotes, who, invoices)`).
 - **Future Fence prices** are in the Materials list (supplier "Future Fence"; names avoid the word "batten" and "frame" so they can't be picked up by the batten-screw or gate-frame price lookups).
+
+- **Start quote for a returning client:** a lead whose client already has quotes used to have no Start quote button (and not count as a new lead). `coveredByQuote` (`lib/leadQuotes.js`) now treats a New or Contacted lead that came in AFTER the client's latest quote as a new request: it keeps the Start quote button and shows in the Board's new leads. A lead that goes back to New from a new request is dated today so the rule sees it.

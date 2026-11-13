@@ -160,6 +160,7 @@ export async function POST(req) {
   // A lead that was quoted, won or lost and now asks for new work comes back as New (so it shows on the Board and buzzes the phone).
   if (["Quoted", "Won", "Lost"].includes(lead.status) && asksForNewWork(text)) {
     patch.status = "New";
+    patch.createdAt = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date());
     applied.push("new request");
     try { await sendPush(supabaseAdmin, { title: `New request: ${lead.name}`, body: text.replace(/\s+/g, " ").slice(0, 120), tag: `lead-${lead.id}`, url: "/" }); } catch {}
   }

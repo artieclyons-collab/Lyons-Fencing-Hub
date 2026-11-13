@@ -32,7 +32,7 @@ import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATIO
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import IntroTextModal from "./IntroTextModal";
-import { hasQuote, quoteTag } from "@/lib/leadQuotes";
+import { hasQuote, coveredByQuote, quoteTag } from "@/lib/leadQuotes";
 import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
@@ -552,7 +552,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
     return Math.floor((new Date().setHours(0, 0, 0, 0) - then.setHours(0, 0, 0, 0)) / 86400000);
   };
 
-  const newLeads = leads.filter((l) => l.status === "New" && !hasQuote(l, quotes)); // a "new" lead whose client already has a quote isn't new
+  const newLeads = leads.filter((l) => l.status === "New" && !coveredByQuote(l, quotes)); // a "new" lead whose client already has a quote isn't new, unless it came in after that quote
   const activeLeads = leads.filter((l) => !["Won", "Lost"].includes(l.status));
   const quotesOut = quotes.filter((q) => q.status === "Sent");
   const bookedJobs = quotes.filter((q) => q.status === "Accepted" && q.startDate && q.startDate >= t);
@@ -947,10 +947,10 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
                   {hasQuote(l, quotes) ? ` · ${quoteTag(l, quotes)}` : ""}
                 </div>
               </div>
-              {needsIntro(l) && !hasQuote(l, quotes) && (
+              {needsIntro(l) && !coveredByQuote(l, quotes) && (
                 <button className="btn-primary small" onClick={(e) => { e.stopPropagation(); setIntroFor(l); }} title="A first text to send from your phone, ready to edit"><Send size={13} /> Intro text</button>
               )}
-              {["New", "Contacted"].includes(l.status) && !hasQuote(l, quotes) && (
+              {["New", "Contacted"].includes(l.status) && !coveredByQuote(l, quotes) && (
                 <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); go("quotes", { newFromLead: l }); }} title="Start a quote with their details filled in"><FileText size={13} /> Start quote</button>
               )}
               <Tag label={l.status} />
@@ -967,7 +967,7 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
           onClose={() => setModal(null)}
           onSave={save}
           onDelete={modal.data ? () => { remove(modal.data.id); setModal(null); } : null}
-          onQuote={modal.data && !hasQuote(modal.data, quotes) ? (f) => { save(f); go("quotes", { newFromLead: f }); } : null}
+          onQuote={modal.data && !coveredByQuote(modal.data, quotes) ? (f) => { save(f); go("quotes", { newFromLead: f }); } : null}
         />
       )}
     </div>
