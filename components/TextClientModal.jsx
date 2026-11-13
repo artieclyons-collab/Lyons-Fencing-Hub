@@ -9,7 +9,8 @@ const SIGN = "Cheers, Artie";
 
 // the wordings on offer for each kind of document
 const presets = ({ kind, name, docNumber, total, deposit }) => {
-  const hi = `Hi ${name || ""}, it's Artie from Lyons Fencing.`.replace("Hi ,", "Hi,");
+  // (no "it's Artie from Lyons Fencing": the client already has your message history)
+  const hi = `Hi ${name || ""},`.replace("Hi ,", "Hi,");
   const doc = docNumber ? ` (${docNumber})` : "";
   if (kind === "quote") {
     return [
