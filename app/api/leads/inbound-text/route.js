@@ -13,7 +13,8 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { foldUpdate } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
-import { clientFromQuotes } from "@/lib/leadQuotes";
+import { clientFromQuotes, clientFromQuotesByName, asksForNewWork } from "@/lib/leadQuotes";
+import { sendPush } from "@/lib/push";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
 export const runtime = "nodejs";
@@ -70,7 +71,7 @@ export async function POST(req) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,email,address,notes").order("inserted_at", { ascending: false });
+  const { data: leads, error } = await supabaseAdmin.from("leads").select("id,name,phone,email,address,notes,status").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // Names compare on letters and digits only, so emoji, spacing and punctuation ("Em ❤️" vs "Em") never get in the way.
   const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -81,31 +82,38 @@ export async function POST(req) {
 
   // An unknown NUMBER (not a saved contact) whose text reads like a fencing enquiry becomes a new lead. A saved contact's
   // name, or a text that doesn't mention fencing or a quote, is treated as personal: dropped, nothing stored.
-  if (!lead && !byName) {
-    // A number that belongs to a client with a quote (someone who's accepted, say) is that client, not a new enquiry: keep what they
-    // said, in short, on a lead under their own name.
+  if (!lead) {
+    // A number (or a saved contact's name) that belongs to a client with a quote (someone who's accepted, say) is that client, not a new
+    // enquiry. If they're asking for new work ("can you quote 2 fence post replacements") it becomes a New lead under their own name, with
+    // the request as site notes so Start quote can read it. Anything else they say is kept, in short, on a lead under their own name.
     const { data: qrows } = await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date");
-    const client = clientFromQuotes(qrows || [], { phone: rawFrom });
+    const client = byName ? clientFromQuotesByName(qrows || [], rawFrom) : clientFromQuotes(qrows || [], { phone: rawFrom });
     if (client) {
-      const rel = relevantParts(text, { max: 320 });
+      const rel = relevantParts(text, { max: 700 });
       if (!rel) return NextResponse.json({ ok: true, matched: false, client: true });
+      const phone = localPhone(client.phone || rawFrom);
+      const newWork = asksForNewWork(text); // (not just mentioning the fence: "it looks great" from a happy client isn't a new job)
+      const enq = newWork ? detectEnquiry(text) : {};
       const row = {
-        id: `txt${from}`,
-        name: client.name || `Client ${localPhone(rawFrom)}`,
-        phone: localPhone(rawFrom),
+        id: `txt${tail(phone) || from}`,
+        name: client.name || `Client ${phone}`,
+        phone,
         email: client.email || null,
-        address: client.address || "",
-        jobType: client.jobType || "Other",
-        status: client.status,
-        notes: `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`,
+        address: enq.address || client.address || "",
+        jobType: newWork ? (enq.jobType && enq.jobType !== "Other" ? enq.jobType : /post|repair|fix|replac/i.test(text) ? "Repairs" : client.jobType || "Other") : client.jobType || "Other",
+        status: newWork ? "New" : client.status,
+        notes: newWork ? rel.replace(/\s*\n\s*/g, " ") : `Text ${stamp()}: ${rel.replace(/\s*\n\s*/g, " ")}`,
         createdAt: new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date()),
         source: "text",
       };
       const { error: cErr } = await supabaseAdmin.from("leads").upsert(row, { onConflict: "id", ignoreDuplicates: true });
       if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
-      console.log("inbound-text: a client's text kept on a lead under their own name");
-      return NextResponse.json({ ok: true, matched: false, created: true, client: true, leadId: row.id });
+      console.log(`inbound-text: a client's text kept on a lead under their own name${newWork ? " (a new request)" : ""}`);
+      if (newWork) { try { await sendPush(supabaseAdmin, { title: `New request: ${row.name}`, body: rel.slice(0, 120), tag: `lead-${row.id}`, url: "/" }); } catch {} }
+      return NextResponse.json({ ok: true, matched: false, created: true, client: true, newWork, leadId: row.id });
     }
+  }
+  if (!lead && !byName) {
     const enq = detectEnquiry(text);
     if (!enq.isEnquiry) return NextResponse.json({ ok: true, matched: false });
     const phone = localPhone(rawFrom);
@@ -130,6 +138,7 @@ export async function POST(req) {
     const { error: insErr } = await supabaseAdmin.from("leads").upsert(row, { onConflict: "id", ignoreDuplicates: true });
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
     console.log(`inbound-text: new lead created from a text (number ending ${from.slice(-3)})`);
+    try { await sendPush(supabaseAdmin, { title: `New enquiry: ${row.name}`, body: [row.address, notes].filter(Boolean).join(" · ").slice(0, 120), tag: `lead-${row.id}`, url: "/" }); } catch {}
     return NextResponse.json({ ok: true, matched: false, created: true, leadId: row.id });
   }
   if (!lead) return NextResponse.json({ ok: true, matched: false }); // not a lead: drop it, store nothing
@@ -144,6 +153,13 @@ export async function POST(req) {
   const patch = {};
   const applied = [];
   let notes = existing;
+
+  // A lead that was quoted, won or lost and now asks for new work comes back as New (so it shows on the Board and buzzes the phone).
+  if (["Quoted", "Won", "Lost"].includes(lead.status) && asksForNewWork(text)) {
+    patch.status = "New";
+    applied.push("new request");
+    try { await sendPush(supabaseAdmin, { title: `New request: ${lead.name}`, body: text.replace(/\s+/g, " ").slice(0, 120), tag: `lead-${lead.id}`, url: "/" }); } catch {}
+  }
 
   // A lead with no name yet ("N/A") whose text says who they are ("it's Chen") gets their name.
   if (isPlaceholderName(lead.name)) {
