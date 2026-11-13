@@ -967,7 +967,7 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
           onClose={() => setModal(null)}
           onSave={save}
           onDelete={modal.data ? () => { remove(modal.data.id); setModal(null); } : null}
-          onQuote={modal.data && !hasQuote(modal.data, quotes) ? () => go("quotes", { newFromLead: modal.data }) : null}
+          onQuote={modal.data && !hasQuote(modal.data, quotes) ? (f) => { save(f); go("quotes", { newFromLead: f }); } : null}
         />
       )}
     </div>
@@ -1035,7 +1035,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {String(form.phone || "").replace(/\D/g, "").length >= 8 && <button className="btn-ghost" onClick={() => setTextClient(true)}><Send size={15} /> Text</button>}
-        {onQuote && <button className="btn-ghost" onClick={onQuote}><FileText size={15} /> Start quote</button>}
+        {onQuote && <button className="btn-ghost" onClick={() => onQuote(form)} title="Saves the lead (including any notes you've just typed), then starts the quote from them"><FileText size={15} /> Start quote</button>}
         <button className="btn-primary" onClick={() => onSave(form)} disabled={!form.name}><Check size={15} /> Save</button>
       </div>
       {textClient && <TextClientModal kind="lead" name={form.name} phone={form.phone} onClose={() => setTextClient(false)} />}
@@ -1420,6 +1420,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
       id: uid(),
       docNumber,
       title: q.title || "",
+      billName: q.billName || "",
       clientName: q.clientName,
       clientEmail: q.clientEmail || "",
       address: q.address,
@@ -1448,6 +1449,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
       id: uid(),
       docNumber,
       title: q.title || "",
+      billName: q.billName || "",
       clientName: q.clientName,
       clientEmail: q.clientEmail || "",
       address: q.address,
@@ -1813,6 +1815,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
       <Field label="Title (shows on the quote, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional: which fence this quote is for" /></Field>
+      <Field label="Make out to (if not the client, e.g. a body corporate)"><input value={form.billName || ""} onChange={(e) => set("billName", e.target.value)} placeholder="Optional, e.g. Gooding Drive Villas CTS 38702" /></Field>
       <div className="field-pair">
         <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
         <Field label="Client email (to send the quote)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
@@ -2249,6 +2252,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
       <Field label="Title (shows on the invoice, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional" /></Field>
+      <Field label="Make out to (if not the client, e.g. a body corporate)"><input value={form.billName || ""} onChange={(e) => set("billName", e.target.value)} placeholder="Optional" /></Field>
       <Field label="Client email (to send the invoice)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
       <Field label="Street address">
         <div className="calc-trigger-row">
@@ -4096,7 +4100,7 @@ export default function HubApp() {
           <AlertTriangle size={16} />
           <span>
             Saved, but your database needs a small update first, so {[...new Set(Object.values(skippedCols).flat())].join(", ")} {Object.values(skippedCols).flat().length === 1 ? "wasn't" : "weren't"} kept.
-            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => c === "title") ? "supabase/migration-10-title.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
+            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => c === "title" || c === "billName") ? "supabase/migration-10-title.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
           </span>
         </div>
       )}

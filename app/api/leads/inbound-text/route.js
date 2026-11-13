@@ -15,6 +15,7 @@ import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName"
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
+import { detectBillTo, getBillTo, setBillTo } from "@/lib/billTo";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
 export const runtime = "nodejs";
@@ -88,7 +89,8 @@ export async function POST(req) {
     // enquiry. If they're asking for new work ("can you quote 2 fence post replacements") it becomes a New lead under their own name, with
     // the request as site notes so Start quote can read it. Anything else they say is kept, in short, on a lead under their own name.
     const { data: qrows } = await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date");
-    const client = byName ? clientFromQuotesByName(qrows || [], rawFrom) : clientFromQuotes(qrows || [], { phone: rawFrom });
+    const { data: irows } = await supabaseAdmin.from("invoices").select("id,quoteId,clientEmail,address,suburb");
+    const client = byName ? clientFromQuotesByName(qrows || [], rawFrom, irows || []) : clientFromQuotes(qrows || [], { phone: rawFrom }, irows || []);
     if (client) {
       const rel = relevantParts(text, { max: 700 });
       if (!rel) return NextResponse.json({ ok: true, matched: false, client: true });
@@ -183,6 +185,13 @@ export async function POST(req) {
       notes = [notes.trim(), dec.noteLine].filter(Boolean).join("\n");
       applied.push(`quote ${dec.decision === "accept" ? "accepted" : "declined"}`);
     }
+  }
+
+  // "Can you put Gooding Drive Villas CTS 38702 in the invoice, it's required by the body corporate": quotes and invoices are made out to that
+  const billTo = detectBillTo(text);
+  if (billTo && getBillTo(notes) !== billTo) {
+    notes = setBillTo(notes, billTo);
+    applied.push("bill to");
   }
 
   const addr = extractAddress(text);
