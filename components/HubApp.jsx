@@ -18,7 +18,7 @@ import {
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
-  buildFilename, suggestedNotes, SLEEPER_NOTE, calcMaterials, colorbondBays, aluminiumLayout, templateMaterialsCost, estFuelCost,
+  buildFilename, suggestedNotes, postWording, SLEEPER_NOTE, calcMaterials, colorbondBays, aluminiumLayout, templateMaterialsCost, estFuelCost,
   isDepositInvoice, DEPOSIT_DUE_NOTE,
 } from "@/lib/logic";
 import { usePersistedList, usePersistedValue, usingSupabase } from "@/lib/storage";
@@ -1045,7 +1045,14 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
 
 // ---------- Line items editor (shared by Quotes & Invoices) ----------
 function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTemplate }) {
-  const update = (id, k, v) => setItems((its) => its.map((it) => (it.id === id ? { ...it, [k]: v } : it)));
+  // changing the quantity of a template line keeps "post" / "posts" right in its wording (unless you've changed the wording yourself)
+  const update = (id, k, v) => setItems((its) => its.map((it) => {
+    if (it.id !== id) return it;
+    const next = { ...it, [k]: v };
+    const t = k === "qty" ? JOB_TEMPLATES.find((j) => j.label === it.tpl) : null;
+    if (t && /post\(s\)/.test(t.desc) && it.desc === postWording(t.desc, it.qty)) next.desc = postWording(t.desc, v);
+    return next;
+  }));
   const remove = (id) => setItems((its) => its.filter((it) => it.id !== id));
   const add = () => setItems((its) => [...its, { id: uid(), desc: "", qty: 1, rate: 0 }]);
   const insertTemplate = (e) => {
@@ -1053,7 +1060,7 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
     const t = JOB_TEMPLATES.find((j) => j.label === label);
     if (t) {
       const qty = t.unit === "m" ? Number(defaultLength) || 1 : 1;
-      const desc = t.desc.replace(/\{height\}/g, fenceHeight || "1.8");
+      const desc = postWording(t.desc.replace(/\{height\}/g, fenceHeight || "1.8"), qty);
       const rate = t.rateFn ? t.rateFn(fenceHeight) : t.rate;
       setItems((its) => [...its, { id: uid(), desc, qty, rate, unit: t.unit, tpl: t.label }]);
       onInsertTemplate?.(t);
