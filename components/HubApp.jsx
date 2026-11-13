@@ -1419,6 +1419,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
     const inv = {
       id: uid(),
       docNumber,
+      title: q.title || "",
       clientName: q.clientName,
       clientEmail: q.clientEmail || "",
       address: q.address,
@@ -1446,6 +1447,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
     const inv = {
       id: uid(),
       docNumber,
+      title: q.title || "",
       clientName: q.clientName,
       clientEmail: q.clientEmail || "",
       address: q.address,
@@ -1535,7 +1537,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
           {visibleQuotes.map((q) => (
             <div className="row-card" key={q.id} onClick={() => setModal({ mode: "edit", data: q })}>
               <div className="row-card-main">
-                <div className="row-card-title">{q.clientName || "Untitled"}</div>
+                <div className="row-card-title">{q.clientName || "Untitled"}{q.title && <span className="doc-kind-badge">{q.title}</span>}</div>
                 <div className="row-card-meta">{q.jobType || ""} · {money(itemsTotal(q.items))} + GST = {money(gstBreakdown(itemsTotal(q.items)).total)} · {q.date}{q.startDate ? ` · starts ${formatDateAU(q.startDate)}` : ""}</div>
               </div>
               <Tag label={q.status} />
@@ -1810,6 +1812,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
+      <Field label="Title (shows on the quote, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional: which fence this quote is for" /></Field>
       <div className="field-pair">
         <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
         <Field label="Client email (to send the quote)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
@@ -2173,7 +2176,7 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
           {visibleInvoices.map((i) => (
             <div className="row-card" key={i.id} onClick={() => setModal({ mode: "edit", data: i })}>
               <div className="row-card-main">
-                <div className="row-card-title">{i.clientName || "Untitled"}{isDepositInvoice(i) && <span className="doc-kind-badge">Deposit invoice</span>}</div>
+                <div className="row-card-title">{i.clientName || "Untitled"}{isDepositInvoice(i) && <span className="doc-kind-badge">Deposit invoice</span>}{i.title && <span className="doc-kind-badge">{i.title}</span>}</div>
                 <div className="row-card-meta">{money(itemsTotal(i.items))} + GST = {money(gstBreakdown(itemsTotal(i.items)).total)} · issued {i.issuedDate}{i.dueDate ? ` · due ${i.dueDate}` : ""}</div>
               </div>
               <Tag label={effectiveStatus(i)} />
@@ -2245,6 +2248,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
+      <Field label="Title (shows on the invoice, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional" /></Field>
       <Field label="Client email (to send the invoice)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
       <Field label="Street address">
         <div className="calc-trigger-row">
@@ -4092,7 +4096,7 @@ export default function HubApp() {
           <AlertTriangle size={16} />
           <span>
             Saved, but your database needs a small update first, so {[...new Set(Object.values(skippedCols).flat())].join(", ")} {Object.values(skippedCols).flat().length === 1 ? "wasn't" : "weren't"} kept.
-            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
+            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => c === "title") ? "supabase/migration-10-title.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
           </span>
         </div>
       )}

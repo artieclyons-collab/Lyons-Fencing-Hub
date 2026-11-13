@@ -13,7 +13,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { foldUpdate } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
-import { clientFromQuotes, clientFromQuotesByName, asksForNewWork } from "@/lib/leadQuotes";
+import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
@@ -76,7 +76,8 @@ export async function POST(req) {
   // Names compare on letters and digits only, so emoji, spacing and punctuation ("Em ❤️" vs "Em") never get in the way.
   const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   const named = byName && norm(rawFrom) ? (leads || []).filter((l) => norm(l.name) === norm(rawFrom)) : [];
-  const lead = byName ? (named.length === 1 ? named[0] : null) : (leads || []).find((l) => tail(l.phone) === from);
+  // (a saved contact is usually "Name Suburb", so a name that isn't exact still finds the lead when the extra words are in their name or address)
+  const lead = byName ? (named.length === 1 ? named[0] : matchContact(rawFrom, (leads || []).map((l) => ({ name: l.name, place: l.address, ref: l }))) ?.ref || null) : (leads || []).find((l) => tail(l.phone) === from);
   // Vercel's log shows why a text wasn't matched (never the message, and only the last 3 digits of a number).
   if (!lead) console.log(`inbound-text: no lead for ${byName ? `name "${rawFrom}" (${named.length} matches)` : `number ending ${from.slice(-3)}`}`);
 
