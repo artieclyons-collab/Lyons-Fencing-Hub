@@ -14,7 +14,7 @@ import {
 
 import {
   JOB_TYPES, LEAD_STATUSES, QUOTE_STATUSES, INVOICE_STATUSES, EXPENSE_CATEGORIES,
-  NOTE_SNIPPETS, JOB_TEMPLATES, PRESET_MATERIALS, LABOUR_RATES, statusColor,
+  NOTE_SNIPPETS, STANDARD_TERMS, JOB_TEMPLATES, PRESET_MATERIALS, LABOUR_RATES, statusColor,
 } from "@/lib/constants";
 import {
   uid, money, today, itemsTotal, gstBreakdown, addMonths, formatDateAU,
@@ -2062,6 +2062,22 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         <textarea rows={4} value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Job-specific notes — tap a snippet above or type your own" />
       </Field>
 
+      {/* The terms and conditions on the quote PDF: the standard ones unless you change them for this quote */}
+      <details style={{ marginBottom: 14 }} open={!!String(form.terms || "").trim()}>
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+          Terms and conditions {String(form.terms || "").trim() ? "(edited for this quote)" : "(standard)"}
+        </summary>
+        <p className="calc-note" style={{ marginTop: 6 }}>One term per line. Change, add or delete lines for this quote only; the standard terms are used for every other quote.</p>
+        <textarea
+          rows={10}
+          value={String(form.terms || "").trim() ? form.terms : STANDARD_TERMS.join("\n")}
+          onChange={(e) => set("terms", e.target.value.trim() === STANDARD_TERMS.join("\n").trim() ? "" : e.target.value)}
+        />
+        {String(form.terms || "").trim() && (
+          <button type="button" className="link-btn" onClick={() => set("terms", "")}>Put the standard terms back</button>
+        )}
+      </details>
+
       {showCalc && (
         <MaterialCalcModal
           materials={materials}
@@ -4107,7 +4123,7 @@ export default function HubApp() {
           <AlertTriangle size={16} />
           <span>
             Saved, but your database needs a small update first, so {[...new Set(Object.values(skippedCols).flat())].join(", ")} {Object.values(skippedCols).flat().length === 1 ? "wasn't" : "weren't"} kept.
-            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => c === "title" || c === "billName") ? "supabase/migration-10-title.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
+            <small>Run the pending SQL update in Supabase ({[...new Set(Object.values(skippedCols).flat())].some((c) => c === "terms") ? "supabase/migration-11-terms.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => c === "title" || c === "billName") ? "supabase/migration-10-title.sql" : [...new Set(Object.values(skippedCols).flat())].some((c) => ["lastFollowUp", "lastChase"].includes(c)) ? "supabase/migration-7-text-reminders.sql" : "supabase/migration-6-job-duration.sql"}) and it'll save from then on.</small>
           </span>
         </div>
       )}
