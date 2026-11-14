@@ -1380,7 +1380,7 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
 
   // Two neighbours sharing a fence: the quote on screen is halved and a new draft quote is made for the neighbour (lib/splitDoc.js).
   const split = (form, neighbour) => {
-    const { mine, theirs } = splitQuote(form, neighbour, { id: uid(), docNumber: previewNumber(), today: today(), newId: uid });
+    const { mine, theirs } = splitQuote(form, neighbour, { id: uid(), docNumber: previewNumber(), today: today(), newId: uid, hours: estimateHours(form).hours });
     bumpDocNumber();
     setQuotes((qs) => [theirs, ...qs.map((q) => (q.id === mine.id ? mine : q))]);
     setModal(null);
