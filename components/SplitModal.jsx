@@ -4,12 +4,13 @@
 import { useState } from "react";
 import { X, Check } from "lucide-react";
 import { money, itemsTotal, gstBreakdown } from "@/lib/logic";
-import { halveItems } from "@/lib/splitDoc";
+import { halveItems, shareItems } from "@/lib/splitDoc";
 
 export default function SplitModal({ kind, doc, number, onClose, onConfirm }) {
   const [n, setN] = useState({ clientName: "", clientPhone: "", clientEmail: "", address: "", suburb: doc.suburb || "" });
   const set = (k, v) => setN((x) => ({ ...x, [k]: v }));
-  const { mine, theirs } = halveItems(doc.items || []);
+  // an invoice keeps every line the same for both and takes off the other's half; a quote is halved line by line
+  const { mine, theirs } = kind === "invoice" ? shareItems(doc.items || [], doc.clientName, n.clientName || "the neighbour", () => "x") : halveItems(doc.items || []);
   const incl = (items) => gstBreakdown(itemsTotal(items)).total;
   const word = kind === "quote" ? "quote" : "invoice";
 
@@ -19,7 +20,9 @@ export default function SplitModal({ kind, doc, number, onClose, onConfirm }) {
         <div className="modal-head"><span>Split this {word} in half</span><button className="icon-btn" onClick={onClose} aria-label="Close"><X size={20} /></button></div>
         <div className="modal-body">
           <p className="calc-note" style={{ marginTop: 0 }}>
-            For a shared fence. Each line priced per metre is halved (the length), other lines are halved in price, and the neighbour gets a new {word} ({number}) for their half. Anything already taken off, like a deposit, stays on {doc.clientName || "the original"}'s.
+            {kind === "invoice"
+              ? `For a shared fence. Both invoices keep the same lines, the full lengths and prices; each one takes off the other's half, so each owes their half. The neighbour gets a new invoice (${number}). Anything already taken off, like a deposit, stays on ${doc.clientName || "the original"}'s.`
+              : `For a shared fence. Each line priced per metre is halved (the length), other lines are halved in price, and the neighbour gets a new quote (${number}) for their half.`}
           </p>
           <div className="calc-preview" style={{ marginBottom: 12 }}>
             <div className="calc-row"><span>{doc.clientName || "Original"} ({doc.docNumber || word})</span><span>{money(incl(mine))} inc. GST</span></div>
