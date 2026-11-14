@@ -32,6 +32,10 @@ const load = () => {
 const dow = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).getDay(); };
 // the day after `iso`, skipping Sundays (Saturdays are worked)
 const nextDay = (iso) => { let d = addDaysIso(iso, 1); if (dow(d) === 0) d = addDaysIso(d, 1); return d; };
+// the most recent day up to today that isn't a Sunday (a new invoice is for work already done, never future days)
+const lastWorkDay = () => { let d = today(); if (dow(d) === 0) d = addDaysIso(d, -1); return d; };
+// the Monday of the week that today falls in (a Sunday counts as the end of the week just worked)
+const mondayOfWeek = () => addDaysIso(today(), -((dow(today()) + 6) % 7));
 const periodOf = (rows) => (rows.length ? (rows[0].date === rows[rows.length - 1].date ? longDate(rows[0].date) : `${longDate(rows[0].date)} – ${longDate(rows[rows.length - 1].date)}`) : "");
 const shortPeriod = (rows) => (rows.length ? (rows[0].date === rows[rows.length - 1].date ? dayLabel(rows[0].date) : `${dayLabel(rows[0].date)} – ${dayLabel(rows[rows.length - 1].date)}`) : "");
 
@@ -78,20 +82,21 @@ export default function LabourInvoice({ addresses = [], expenses = [], setExpens
 
   // the day after the last one added (today if it's empty), same job address as the last day
   const addDay = (hours) => {
-    const date = lastDay ? nextDay(lastDay.date) : dow(today()) === 0 ? nextDay(today()) : today();
+    const date = lastDay ? nextDay(lastDay.date) : lastWorkDay();
     setInv((i) => ({ ...i, days: [...i.days, { id: uid(), date, hours: String(hours ?? lastDay?.hours ?? 8), address: lastDay?.address || "" }] }));
   };
-  // The rest of that working week up to Friday (a whole Mon–Fri if the last day was Fri or later), same hours and address as the last day
+  // The rest of that working week up to Friday (a whole Mon–Fri if the last day was Fri or later), same hours and address as the last day.
+  // It never goes past today, and on a new invoice it starts at this week's Monday, so it can't make future dates.
   const addWeek = () => {
-    let d = lastDay ? addDaysIso(lastDay.date, 1) : today();
+    let d = lastDay ? addDaysIso(lastDay.date, 1) : mondayOfWeek();
     while (dow(d) === 0 || dow(d) === 6) d = addDaysIso(d, 1);
     const days = [];
-    for (;;) {
+    while (d <= today()) {
       days.push({ id: uid(), date: d, hours: String(lastDay?.hours ?? 8), address: lastDay?.address || "" });
       if (dow(d) === 5) break;
       d = addDaysIso(d, 1);
     }
-    setInv((i) => ({ ...i, days: [...i.days, ...days] }));
+    if (days.length) setInv((i) => ({ ...i, days: [...i.days, ...days] }));
   };
 
   // Once an invoice has gone out (downloaded or texted) it's kept in "Past invoices" and the next one starts, numbered one higher.
