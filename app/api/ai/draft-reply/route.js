@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
-import { EMAIL_SYSTEM, REVIEW_SYSTEM, parseJson } from "@/lib/replyDrafts";
+import { EMAIL_SYSTEM, REVIEW_SYSTEM, parseJson, withSignOff } from "@/lib/replyDrafts";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,7 +24,7 @@ export async function POST(req) {
       messages: [{ role: "user", content: text }],
     });
     const out = parseJson((resp.content || []).filter((x) => x.type === "text").map((x) => x.text).join(" "));
-    return NextResponse.json(email ? { subject: String(out.subject || ""), body: String(out.body || ""), needs: Array.isArray(out.needs) ? out.needs.map(String) : [] } : { reply: String(out.reply || "") });
+    return NextResponse.json(email ? { subject: String(out.subject || ""), body: withSignOff(out.body), needs: Array.isArray(out.needs) ? out.needs.map(String) : [] } : { reply: String(out.reply || "") });
   } catch (e) {
     console.log("draft-reply failed —", String(e?.message || e).slice(0, 160));
     return NextResponse.json({ error: "Couldn't write that just now. Try again." }, { status: 500 });
