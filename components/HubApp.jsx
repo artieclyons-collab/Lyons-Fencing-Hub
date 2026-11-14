@@ -3146,7 +3146,7 @@ const mapsTo = (address) => `https://www.google.com/maps/dir/?api=1&destination=
 const dayTitle = (date) => new Date(`${date}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
 const dayTitleLong = (date) => new Date(`${date}T00:00:00`).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
 
-const DEFAULT_SMS = "Hi {name}, it's Artie from Lyons Fencing. I'm on my way to you now and should be there around {eta}. See you soon!";
+const DEFAULT_SMS = "Hi {name},\n\nI'm on my way to you now and should be there around {eta}. See you soon!\n\nCheers,\nArtie";
 // "Greg " -> "Greg"; skip placeholders like "N/A" so the text just says "Hi,".
 const firstName = (name) => {
   const n = String(name || "").replace(/\(.*?\)/g, "").trim().split(/\s+/)[0] || "";
@@ -3413,7 +3413,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
     if (r.kind === "job") setNote(`Moved ${r.lead.name}'s job start to ${dayTitle(date)}.`);
     if (withText && r.lead.phone) {
       const first = firstName(r.lead.name) || "there";
-      const body = `Hi ${first}, no problem — I've moved you to ${dayTitleLong(date)}. See you then. Cheers, Artie`;
+      const body = `Hi ${first},\n\nNo problem, I've moved you to ${dayTitleLong(date)}. See you then.\n\nCheers,\nArtie`;
       setTimeout(() => { window.location.href = smsHref(r.lead.phone, body); }, 500);
     }
   };
@@ -3463,7 +3463,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
     setMoveFor(null);
     if (withText && s.phone) {
       const first = firstName(s.name) || "there";
-      const body = `Hi ${first}, it's Artie from Lyons Fencing. No problem — would ${dayTitleLong(date)}${s.notBefore != null ? ` after ${fmtClock(s.notBefore)}` : ""} suit for me to come out and look at the job instead? Let me know. Cheers`;
+      const body = `Hi ${first},\n\nNo problem, would ${dayTitleLong(date)}${s.notBefore != null ? ` after ${fmtClock(s.notBefore)}` : ""} suit for me to come out and look at the job instead? Let me know.\n\nCheers,\nArtie`;
       setTimeout(() => { window.location.href = smsHref(s.phone, body); }, 500); // gives the save a moment to start first
     }
   };
@@ -3743,7 +3743,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
               : x.notBefore != null
                 ? `${x.name} can't start before ${fmtClock(x.notBefore)}, and ${dayTitle(x.from)} is already packed (${n} visits), so they'd be squeezed in at the end of a long day.`
                 : `${dayTitle(x.from)} is packed (${n} visits) and ${x.name} has no time booked, so they're the easiest to move.`;
-            const body = `Hi ${first}, it's Artie from Lyons Fencing. Would ${dayTitleLong(x.to)}${x.notBefore != null ? ` after ${fmtClock(x.notBefore)}` : ""} suit for me to come out and look at the job instead? Cheers`;
+            const body = `Hi ${first},\n\nWould ${dayTitleLong(x.to)}${x.notBefore != null ? ` after ${fmtClock(x.notBefore)}` : ""} suit for me to come out and look at the job instead?\n\nCheers,\nArtie`;
             return (
               <div key={sugKey(x)} className="vp-sug">
                 <div className="vp-sug-main">

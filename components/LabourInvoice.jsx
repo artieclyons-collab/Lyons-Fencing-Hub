@@ -128,7 +128,7 @@ export default function LabourInvoice({ addresses = [], expenses = [], setExpens
   const textDoc = (doc) => {
     const t = labourTotals(doc);
     const link = `${window.location.origin}/api/labour-pdf?d=${encodeLabour(doc)}`;
-    const body = `Hey Usher, invoice ${doc.number} for ${money(t.total)} (${shortPeriod(t.rows)}) is ready. Open the link, save the PDF and email it through to me please. ${link}`;
+    const body = `Hey Usher,\n\nInvoice ${doc.number} for ${money(t.total)} (${shortPeriod(t.rows)}) is ready. Open the link, save the PDF and email it through to me please.\n\n${link}\n\nCheers,\nArtie`;
     window.location.href = smsLink(LABOURER.phone, body);
   };
 
