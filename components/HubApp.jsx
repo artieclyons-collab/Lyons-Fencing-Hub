@@ -52,7 +52,10 @@ import JobChecks from "./JobChecks";
 import LeadSources from "./LeadSources";
 import QuoteResults from "./QuoteResults";
 import JobProfit from "./JobProfit";
+import TidyUp from "./TidyUp";
 import Assistant from "./Assistant";
+
+const nOf = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`; // "3 drafts", "1 draft"
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
 // It starts at the day Artie got back to Australia.
@@ -703,7 +706,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 
   const cards = [
     { label: "New leads", value: newLeads.length, sub: `${activeLeads.length} active`, icon: Users, tab: "leads", tone: "timber" },
-    { label: "Quotes out", value: quotesOut.length, sub: `${whole(sum(quotesOut, (q) => inc(q.items)))} inc. GST`, icon: FileText, tab: "quotes", tone: "steel" },
+    // quotes still worth chasing (sent in the last month); the older ones with no answer are counted separately, not as live money
+    { label: "Quotes out", value: quotesOut.length - staleQuotes.length, sub: `${whole(sum(quotesOut.filter((q) => !staleQuotes.includes(q)), (q) => inc(q.items)))} inc. GST${staleQuotes.length ? ` · ${staleQuotes.length} older` : ""}`, icon: FileText, tab: "quotes", tone: "steel" },
     { label: "Booked jobs", value: bookedJobs.length, sub: `${whole(sum(bookedJobs, (q) => inc(q.items)))} inc. GST`, icon: Hammer, tab: "quotes", tone: "hivis" },
     { label: "Owed to you", value: whole(owed), sub: plural(unpaidInvoices.length, "unpaid invoice"), icon: Receipt, tab: "invoices", tone: "good", warn: overdue.length > 0 },
   ];
@@ -767,6 +771,31 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
 
       <div className="panel">
         <div className="panel-head">
+          <AlertTriangle size={16} />
+          <span>Needs your attention</span>
+        </div>
+        {attention.length === 0 ? (
+          <div className="all-clear"><Check size={16} /> All clear — nothing needs chasing right now.</div>
+        ) : (
+          attention.map((a) => (
+            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => (a.onClick ? a.onClick() : go(a.tab, a.open ? { open: a.open } : undefined))}>
+              <a.icon size={16} />
+              <div className="attention-main">
+                <div>{a.text}</div>
+                {a.sub && <div className="attention-sub">{a.sub}</div>}
+              </div>
+              <ChevronRight size={16} />
+            </div>
+          ))
+        )}
+      </div>
+
+      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
+
+      <JobChecks quotes={quotes} invoices={invoices} expenses={expenses} setExpenses={setExpenses} />
+
+      <div className="panel">
+        <div className="panel-head">
           <TrendingUp size={16} />
           <span>Money{moneyFrom ? ` · jobs since ${shortDate(moneyFrom)}` : " · all jobs"}</span>
           <button className="link-btn" style={{ marginLeft: "auto", textTransform: "none", letterSpacing: 0 }} onClick={() => go("finances")}>Breakdown</button>
@@ -824,31 +853,6 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           </div>
         )}
       </div>
-
-      <div className="panel">
-        <div className="panel-head">
-          <AlertTriangle size={16} />
-          <span>Needs your attention</span>
-        </div>
-        {attention.length === 0 ? (
-          <div className="all-clear"><Check size={16} /> All clear — nothing needs chasing right now.</div>
-        ) : (
-          attention.map((a) => (
-            <div key={a.key} className={`attention-row${a.bad ? " bad" : ""}`} onClick={() => (a.onClick ? a.onClick() : go(a.tab, a.open ? { open: a.open } : undefined))}>
-              <a.icon size={16} />
-              <div className="attention-main">
-                <div>{a.text}</div>
-                {a.sub && <div className="attention-sub">{a.sub}</div>}
-              </div>
-              <ChevronRight size={16} />
-            </div>
-          ))
-        )}
-      </div>
-
-      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
-
-      <JobChecks quotes={quotes} invoices={invoices} expenses={expenses} setExpenses={setExpenses} />
 
       <PushAlerts />
 
@@ -918,6 +922,8 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
     setModal(null);
   };
   const remove = (id) => setLeads((ls) => ls.filter((l) => l.id !== id));
+  // leads that have sat as New or Contacted for 3+ weeks with no quote are almost certainly dead: offer to mark them Lost (they stay in the list)
+  const deadLeads = leads.filter((l) => ["New", "Contacted"].includes(l.status) && !coveredByQuote(l, quotes) && l.createdAt && (Date.parse(today()) - Date.parse(String(l.createdAt).slice(0, 10))) / 86400000 > 21);
 
   return (
     <div>
@@ -931,6 +937,14 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
         </button>
       </div>
 
+      {deadLeads.length > 0 && (
+        <TidyUp
+          text={`${nOf(deadLeads.length, "lead")} with no quote for over 3 weeks (${deadLeads.slice(0, 4).map((l) => l.name).join(", ")}${deadLeads.length > 4 ? "…" : ""}). Probably gone cold.`}
+          button="Mark as Lost"
+          confirm={`Mark these as Lost? They stay in your Leads list.\n\n${deadLeads.map((l) => l.name).join("\n")}`}
+          onDo={() => setLeads((ls) => ls.map((l) => (deadLeads.some((d) => d.id === l.id) ? { ...l, status: "Lost" } : l)))}
+        />
+      )}
       {leads.length > 0 && (
         <SearchBar value={query} onChange={setQuery} placeholder="Search leads — name, phone, address, notes…" shown={visibleLeads.length} total={leads.length}>
           <select className="search-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
@@ -1351,6 +1365,8 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
 
   const save = (data) => {
     const { _fromLeadId, _draft, _batch, ...row } = data;
+    // marking a quote Accepted by hand records the day, the same as when the client accepts online (the win-rate and Board lists use it)
+    if (row.status === "Accepted" && !row.acceptedAt && quotes.find((q) => q.id === row.id)?.status !== "Accepted") row.acceptedAt = today();
     if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
     else {
       bumpDocNumber();
@@ -1505,6 +1521,10 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
     }
   };
 
+  const ageDays = (iso) => (iso ? (Date.parse(today()) - Date.parse(String(iso).slice(0, 10))) / 86400000 : 0);
+  const oldDrafts = quotes.filter((q) => q.status === "Draft" && ageDays(q.date) > 30);
+  const quietQuotes = quotes.filter((q) => q.status === "Sent" && ageDays(q.date) > 30);
+
   return (
     <div>
       <div className="section-head row">
@@ -1526,6 +1546,23 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
         </div>
       </div>
       {quickScanError && <p className="calc-note" style={{ color: "var(--bad)", marginBottom: 14 }}>{quickScanError}</p>}
+      {oldDrafts.length > 0 && (
+        <TidyUp
+          danger
+          text={`${nOf(oldDrafts.length, "draft")} more than a month old that never went out (${oldDrafts.slice(0, 4).map((q) => q.docNumber).join(", ")}${oldDrafts.length > 4 ? "…" : ""}).`}
+          button="Delete them"
+          confirm={`Permanently delete these ${oldDrafts.length} old drafts? This can't be undone.\n\n${oldDrafts.map((q) => `${q.docNumber} ${q.clientName || ""}`).join("\n")}`}
+          onDo={() => setQuotes((qs) => qs.filter((q) => !oldDrafts.some((d) => d.id === q.id)))}
+        />
+      )}
+      {quietQuotes.length > 0 && (
+        <TidyUp
+          text={`${nOf(quietQuotes.length, "quote")} sent over a month ago with no answer. Marking them Declined keeps your numbers honest.`}
+          button="Mark as Declined"
+          confirm={`Mark these ${quietQuotes.length} quotes as Declined?\n\n${quietQuotes.map((q) => `${q.docNumber} ${q.clientName || ""}`).join("\n")}`}
+          onDo={() => setQuotes((qs) => qs.map((q) => (quietQuotes.some((d) => d.id === q.id) ? { ...q, status: "Declined" } : q)))}
+        />
+      )}
       {bulkImportOpen && (
         <BulkImportQuotesModal
           onClose={() => setBulkImportOpen(false)}
@@ -2155,7 +2192,9 @@ function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes,
   }, [pendingOpen, invoices]);
   const previewNumber = () => `LFS${settings?.nextDocNumber || 458}`;
 
-  const save = (data) => {
+  const save = (rawData) => {
+    // setting the status to Paid in the form records the day too (the Mark paid button already did)
+    const data = rawData.status === "Paid" && !rawData.paidDate ? { ...rawData, paidDate: today() } : rawData;
     if (data.id && invoices.some((i) => i.id === data.id)) setInvoices((is) => is.map((i) => (i.id === data.id ? data : i)));
     else {
       bumpDocNumber();
