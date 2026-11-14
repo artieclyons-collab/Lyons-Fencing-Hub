@@ -1821,7 +1821,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
-      <Field label="Title (shows on the quote, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional: which fence this quote is for" /></Field>
+      <Field label="Title for the email (optional, e.g. Rear boundary): not shown on the quote"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional: which fence this quote is for" /></Field>
       <Field label="Make out to (if not the client, e.g. a body corporate)"><input value={form.billName || ""} onChange={(e) => set("billName", e.target.value)} placeholder="Optional, e.g. Gooding Drive Villas CTS 38702" /></Field>
       <div className="field-pair">
         <Field label="Client phone (for follow-up texts)"><input type="tel" value={form.clientPhone || ""} onChange={(e) => set("clientPhone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
@@ -2274,7 +2274,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
       </div>
-      <Field label="Title (shows on the invoice, e.g. Rear boundary)"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional" /></Field>
+      <Field label="Title for the email (optional): not shown on the invoice"><input value={form.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="Optional" /></Field>
       <Field label="Make out to (if not the client, e.g. a body corporate)"><input value={form.billName || ""} onChange={(e) => set("billName", e.target.value)} placeholder="Optional" /></Field>
       <Field label="Client email (to send the invoice)"><input type="email" value={form.clientEmail || ""} onChange={(e) => set("clientEmail", e.target.value)} placeholder="name@email.com" /></Field>
       <Field label="Street address">
