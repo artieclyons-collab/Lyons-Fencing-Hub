@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseAvailability, parseNotesAvailability, withAvailability, detectCancellation } from "@/lib/availability";
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
+import { decisionAlert } from "@/lib/push";
 import { foldUpdate } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
@@ -182,6 +183,7 @@ export async function POST(req) {
     const dec = decideQuote({ lead, quotes: quoteRows || [], text, via: "text" });
     if (dec && !dec.ambiguous && (await saveDecision(supabaseAdmin, dec))) {
       decided = true;
+      await decisionAlert(supabaseAdmin, dec);
       patch.status = dec.leadPatch.status;
       notes = [notes.trim(), dec.noteLine].filter(Boolean).join("\n");
       applied.push(`quote ${dec.decision === "accept" ? "accepted" : "declined"}`);

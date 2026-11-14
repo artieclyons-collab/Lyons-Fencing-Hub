@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { today } from "@/lib/logic";
+import { today, itemsTotal, gstBreakdown } from "@/lib/logic";
+import { sendPush } from "@/lib/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,7 +51,17 @@ export async function POST(req, { params }) {
     updates = { status: "Declined" };
   }
 
+  const { data: before } = await supabaseAdmin.from("quotes").select("docNumber,clientName,items,status").eq("id", id).limit(1);
   const { error } = await supabaseAdmin.from("quotes").update(updates).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // buzz the phone (only when the status really changed, so reopening the link and pressing the button again stays quiet)
+  const q = before?.[0];
+  if (q && q.status !== updates.status) {
+    try {
+      const accepted = updates.status === "Accepted";
+      const total = Math.round(gstBreakdown(itemsTotal(q.items)).total).toLocaleString("en-AU");
+      await sendPush(supabaseAdmin, { title: accepted ? `Quote accepted: ${q.clientName || "a client"}` : `Quote declined: ${q.clientName || "a client"}`, body: `${q.docNumber || "Their quote"} · $${total} inc. GST${accepted ? ". Tap to set a start date." : ""}`, tag: `decision-${id}`, url: "/?tab=quotes" });
+    } catch { /* the alert is a bonus */ }
+  }
   return NextResponse.json({ ok: true, quote: updates });
 }

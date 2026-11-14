@@ -18,7 +18,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
-import { sendPush, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
+import { sendPush, decisionAlert, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
 import { foldUpdate } from "@/lib/noteSummary";
 import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
@@ -237,6 +237,7 @@ export async function POST(req) {
         if (detectDecision(fresh)) {
           dec = decideQuote({ lead, quotes: await loadQuotes(), text: fresh, via: "email", now: e.receivedAt });
           if (dec && (dec.ambiguous || !(await saveDecision(supabaseAdmin, dec)))) dec = null;
+          else if (dec) await decisionAlert(supabaseAdmin, dec);
         }
         const change = applyClientMessage(lead, e.text, e.receivedAt, { skipCancel: !!dec, display: e.display, address: e.address });
         if (!change && !dec) continue;
