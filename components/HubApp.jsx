@@ -1579,11 +1579,10 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
       {quickScanError && <p className="calc-note" style={{ color: "var(--bad)", marginBottom: 14 }}>{quickScanError}</p>}
       {oldDrafts.length > 0 && (
         <TidyUp
-          danger
-          text={`${nOf(oldDrafts.length, "draft")} more than a month old that never went out (${oldDrafts.slice(0, 4).map((q) => q.docNumber).join(", ")}${oldDrafts.length > 4 ? "…" : ""}).`}
-          button="Delete them"
-          confirm={`Permanently delete these ${oldDrafts.length} old drafts? This can't be undone.\n\n${oldDrafts.map((q) => `${q.docNumber} ${q.clientName || ""}`).join("\n")}`}
-          onDo={() => setQuotes((qs) => qs.filter((q) => !oldDrafts.some((d) => d.id === q.id)))}
+          text={`${nOf(oldDrafts.length, "quote")} still marked Draft after a month (${oldDrafts.slice(0, 4).map((q) => q.docNumber).join(", ")}${oldDrafts.length > 4 ? "…" : ""}). If they went out, mark them Sent so they're tracked and followed up.`}
+          button="Mark as Sent"
+          confirm={`Mark these ${oldDrafts.length} quotes as Sent?\n\n${oldDrafts.map((q) => `${q.docNumber} ${q.clientName || ""}`).join("\n")}`}
+          onDo={() => setQuotes((qs) => qs.map((q) => (oldDrafts.some((d) => d.id === q.id) ? { ...q, status: "Sent" } : q)))}
         />
       )}
       {quietQuotes.length > 0 && (
