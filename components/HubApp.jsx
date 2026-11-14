@@ -51,6 +51,7 @@ import PushAlerts from "./PushAlerts";
 import JobChecks from "./JobChecks";
 import LeadSources from "./LeadSources";
 import QuoteResults from "./QuoteResults";
+import JobProfit from "./JobProfit";
 import Assistant from "./Assistant";
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
@@ -2789,6 +2790,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
       </details>
 
       <SupplierInvoices jobs={allJobs} expenses={expenses} setExpenses={setExpenses} />
+
+      <JobProfit jobs={jobs} />
 
       <QuoteResults leads={leads} quotes={quotes} />
 

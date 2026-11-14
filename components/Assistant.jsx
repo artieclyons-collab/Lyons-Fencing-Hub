@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, MicOff, Send, Camera, Mail, Star, Copy, Check, Volume2, VolumeX, X, Trash2, Sparkles } from "lucide-react";
 import { money, itemsTotal, gstBreakdown } from "@/lib/logic";
-import { canListen, canSpeak, listen, speak, stopSpeaking } from "@/lib/voice";
+import { canListen, canSpeak, listen, speak, stopSpeaking, unlockSpeech, onVoicesReady, pickVoice, chooseVoice } from "@/lib/voice";
 import { clientOptions, searchClients } from "@/lib/clientPick";
 import { quotesForLead } from "@/lib/quoteDecision";
 
@@ -30,20 +30,28 @@ function Ask() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [heard, setHeard] = useState(false); // the question was spoken, so the answer is read out
+  const [speaking, setSpeaking] = useState(false);
+  const [voices, setVoices] = useState([]);
+  const [voiceUri, setVoiceUri] = useState("");
   const [listening, setListening] = useState(false);
-  const [reads, setReads] = useState(true);
+  const [reads, setReads] = useState(true); // answers are spoken back (on unless you turn it off)
   const [mic, setMic] = useState(false);
   const rec = useRef(null);
   const endRef = useRef(null);
-  useEffect(() => { setMic(canListen()); try { setReads(window.localStorage.getItem("lyons:ask-speak") !== "off"); } catch {} }, []);
+  useEffect(() => {
+    setMic(canListen());
+    try { setReads(window.localStorage.getItem("lyons:ask-speak") !== "off"); } catch {}
+    return onVoicesReady((list) => { setVoices(list); setVoiceUri(pickVoice()?.voiceURI || ""); });
+  }, []);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [msgs, busy]);
   useEffect(() => () => { rec.current?.stop(); stopSpeaking(); }, []);
 
-  const ask = async (q, spoken = false) => {
+  const ask = async (q) => {
     const question = String(q || "").trim();
     if (!question || busy) return;
     stopSpeaking();
+    setSpeaking(false);
+    if (reads) unlockSpeech(); // the phone only lets the page talk after a tap, so this happens inside the tap that sends the question
     setError("");
     setInput("");
     const history = msgs;
@@ -52,33 +60,32 @@ function Ask() {
     try {
       const { answer } = await post("/api/ask", { question, history });
       setMsgs((m) => [...m, { role: "assistant", content: answer }]);
-      if ((spoken || heard) && reads && canSpeak()) speak(answer);
+      if (reads && canSpeak()) speak(answer, { onStart: () => setSpeaking(true), onDone: () => setSpeaking(false) });
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
-      setHeard(false);
     }
   };
 
   const toggleMic = () => {
     if (listening) { rec.current?.stop(); return; }
     stopSpeaking();
+    setSpeaking(false);
+    if (reads) unlockSpeech();
     setError("");
-    setHeard(true);
     setListening(true);
     let last = "";
     rec.current = listen({
       onText: (t, final) => { last = t; setInput(t); if (final) { rec.current?.stop(); } },
-      onEnd: () => { setListening(false); if (last) ask(last, true); },
+      onEnd: () => { setListening(false); if (last) ask(last); },
       onError: (code) => {
         setListening(false);
-        setHeard(false);
         setError(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked for this page. Allow it in your phone's settings, or use the microphone key on your keyboard instead." : code === "no-speech" ? "I didn't hear anything. Tap the mic and try again." : "Listening didn't work here. Use the microphone key on your keyboard instead.");
       },
     });
   };
-  const toggleReads = () => { const n = !reads; setReads(n); if (!n) stopSpeaking(); try { window.localStorage.setItem("lyons:ask-speak", n ? "on" : "off"); } catch {} };
+  const toggleReads = () => { const n = !reads; setReads(n); if (!n) { stopSpeaking(); setSpeaking(false); } try { window.localStorage.setItem("lyons:ask-speak", n ? "on" : "off"); } catch {} };
 
   return (
     <div>
@@ -102,9 +109,23 @@ function Ask() {
         <button type="button" className="btn-primary" disabled={busy || !input.trim()} onClick={() => ask(input)} aria-label="Send"><Send size={16} /></button>
       </div>
       <div className="calc-trigger-row" style={{ marginTop: 8, alignItems: "center" }}>
-        {canSpeak() && <button type="button" className="link-btn" onClick={toggleReads}>{reads ? <><Volume2 size={12} /> Reads answers aloud when you speak</> : <><VolumeX size={12} /> Answers not read aloud</>}</button>}
-        {msgs.length > 0 && <button type="button" className="link-btn" onClick={() => { stopSpeaking(); setMsgs([]); setError(""); }}><Trash2 size={12} /> Clear</button>}
+        {canSpeak() && <button type="button" className="link-btn" onClick={toggleReads}>{reads ? <><Volume2 size={12} /> Voice replies on</> : <><VolumeX size={12} /> Voice replies off</>}</button>}
+        {speaking && <button type="button" className="btn-ghost small" onClick={() => { stopSpeaking(); setSpeaking(false); }}><VolumeX size={13} /> Stop talking</button>}
+        {msgs.length > 0 && <button type="button" className="link-btn" onClick={() => { stopSpeaking(); setSpeaking(false); setMsgs([]); setError(""); }}><Trash2 size={12} /> Clear</button>}
       </div>
+      {canSpeak() && reads && (
+        <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
+          <span>Voice</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select value={voiceUri} onChange={(e) => { setVoiceUri(e.target.value); chooseVoice(e.target.value); }} style={{ flex: 1, minWidth: 0 }}>
+              {voices.length === 0 && <option value="">Phone's default voice</option>}
+              {voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang.replace("_", "-")})</option>)}
+            </select>
+            <button type="button" className="btn-ghost small" onClick={() => { unlockSpeech(); speak("G'day Artie. This is how I'll sound. Your next job starts on Monday.", { onStart: () => setSpeaking(true), onDone: () => setSpeaking(false) }); }}>Hear it</button>
+          </div>
+          <span style={{ fontSize: 11.5 }}>For a more natural voice on iPhone: Settings, Accessibility, Spoken Content, Voices, English (Australia), then download an Enhanced or Premium one (Karen or Matilda). It shows up here.</span>
+        </div>
+      )}
       {!mic && <p className="calc-note">To talk instead of type: tap the box and use the microphone key on your keyboard, then press send.</p>}
       {mic && <p className="calc-note">If the mic button doesn't work from your Home Screen icon, open the hub in Safari, or use the microphone key on your keyboard.</p>}
     </div>
