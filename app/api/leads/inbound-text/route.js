@@ -15,7 +15,7 @@ import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName"
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
-import { detectBillTo, getBillTo, setBillTo } from "@/lib/billTo";
+import { detectBillTo, getBillTo, setBillTo, mentionsOtherHousehold } from "@/lib/billTo";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
 export const runtime = "nodejs";
@@ -195,7 +195,7 @@ export async function POST(req) {
     applied.push("bill to");
   }
 
-  const addr = extractAddress(text);
+  const addr = mentionsOtherHousehold(text) ? null : extractAddress(text); // (an address in a message about the neighbour isn't this client's)
   if (addr) {
     const cur = String(lead.address || "").trim();
     if (norm(cur) !== norm(addr.full)) {
