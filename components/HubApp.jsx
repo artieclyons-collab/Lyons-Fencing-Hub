@@ -4007,6 +4007,13 @@ const TABS = [
 
 export default function HubApp() {
   const [tab, setTab] = useState("dashboard");
+  // a phone alert can open a particular tab (e.g. /?tab=finances)
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      if (t && TABS.some((x) => x.key === t)) { setTab(t); window.history.replaceState(null, "", window.location.pathname); }
+    } catch { /* no URL to read */ }
+  }, []);
   const [pendingNewFrom, setPendingNewFrom] = useState(null);
   const [pendingOpen, setPendingOpen] = useState(null); // a quote, lead or invoice to open as soon as its page shows
   const [settingsOpen, setSettingsOpen] = useState(false);

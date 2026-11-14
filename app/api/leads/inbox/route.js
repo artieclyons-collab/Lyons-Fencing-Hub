@@ -223,7 +223,7 @@ export async function POST(req) {
         if (error) throw new Error(error.message);
         leads.push(row);
         created.push(row.name);
-        alerts.push({ title: `New hipages lead: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "Job details are in"}. Reply now, the first text wins.`, tag: `lead-${row.id}`, url: "/" });
+        alerts.push({ title: `New hipages lead: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "Job details are in"}. Reply now, the first text wins.`, tag: `lead-${row.id}`, url: "/?tab=leads" });
         console.log("inbox: new lead added from a hipages job-details email");
         continue;
       }
@@ -289,7 +289,7 @@ export async function POST(req) {
       if (error) throw new Error(error.message);
       leads.push(row);
       created.push(row.name);
-      alerts.push({ title: `New enquiry: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "From an email"}`, tag: `lead-${row.id}`, url: "/" });
+      alerts.push({ title: `New enquiry: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "From an email"}`, tag: `lead-${row.id}`, url: "/?tab=leads" });
       console.log("inbox: new lead added from an enquiry email");
     }
 
@@ -304,7 +304,7 @@ export async function POST(req) {
           await supabaseAdmin.from("expenses").upsert({ id: SUP_SEEN_ID, category: "System", description: JSON.stringify(supSeenList.slice(-300)), amount: "0", date: new Date().toISOString().slice(0, 10) });
         }
         supplierQueued = r.queued.length;
-        for (const q of r.queued) alerts.push({ title: `Supplier invoice to check: ${q.supplier}`, body: `$${Number(q.total).toFixed(2)}. Open Finances and pick the job it was for.`, tag: `sup-${Math.round(q.total * 100)}`, url: "/" });
+        for (const q of r.queued) alerts.push({ title: `Supplier invoice to check: ${q.supplier}`, body: `$${Number(q.total).toFixed(2)}. Open Finances and pick the job it was for.`, tag: `sup-${Math.round(q.total * 100)}`, url: "/?tab=finances" });
       } catch (e) {
         console.log("inbox: supplier invoices couldn't be imported —", String(e?.message || e).slice(0, 100));
       }
