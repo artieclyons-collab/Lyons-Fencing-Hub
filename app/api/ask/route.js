@@ -2,7 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildAskContext, ASK_SYSTEM } from "@/lib/askContext";
-import { today } from "@/lib/logic";
+import { buildJobs } from "@/lib/finances";
+import { labourLines } from "@/lib/labourInvoice";
+import { supplierInvoices } from "@/lib/supplierInvoice";
+import { jobProfits, routeKmMap } from "@/lib/jobProfit";
 
 // "Ask the hub a question": reads the current leads, quotes, invoices and expenses from the database (so it's always up to date,
 // whatever device asks) and has Claude answer from them. Behind the hub password like everything else.
@@ -25,14 +28,20 @@ export async function POST(req) {
       .slice(-6)
       .map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }));
 
-    const [leads, quotes, invoices, expenses] = await Promise.all(
-      ["leads", "quotes", "invoices", "expenses"].map(async (t) => {
+    const [leads, quotes, invoices, expenses, materials, settingsRows] = await Promise.all(
+      ["leads", "quotes", "invoices", "expenses", "materials", "settings"].map(async (t) => {
         const { data, error } = await supabaseAdmin.from(t).select("*");
         if (error) throw new Error(`${t}: ${error.message}`);
         return data || [];
       })
     );
-    const facts = buildAskContext({ leads, quotes, invoices, expenses, todayIso: brisbaneToday() });
+    const todayIso = brisbaneToday();
+    let profitRows = [];
+    try {
+      const jobs = buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: todayIso });
+      profitRows = jobProfits(jobs, settingsRows?.[0] || {}, routeKmMap(expenses));
+    } catch (e) { console.log("ask: profit figures skipped —", String(e?.message || e).slice(0, 100)); }
+    const facts = buildAskContext({ leads, quotes, invoices, expenses, profitRows, todayIso });
 
     const client = new Anthropic();
     const resp = await client.messages.create({

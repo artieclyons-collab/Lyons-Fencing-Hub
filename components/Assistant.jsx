@@ -23,7 +23,7 @@ function CopyBtn({ text, label = "Copy" }) {
 }
 
 // ---------------- Ask the hub ----------------
-const IDEAS = ["How much have I made this month?", "Who still owes me money?", "Which quotes haven't been answered?", "How many leads came in this week?"];
+const IDEAS = ["How much have I made this month?", "Who still owes me money?", "Which job made me the most profit?", "Which quotes haven't been answered?"];
 
 function Ask() {
   const [msgs, setMsgs] = useState([]);

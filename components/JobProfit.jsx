@@ -4,21 +4,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { PiggyBank } from "lucide-react";
 import { money } from "@/lib/logic";
-import { jobProfits, profitTotals, profitByType } from "@/lib/jobProfit";
+import { jobProfits, profitTotals, profitByType, routeKmMap, ROUTE_KM_ID } from "@/lib/jobProfit";
 import { estimateRouteDistance } from "@/lib/ai";
 
 const SHOW = 6;
 const pct = (m) => (m == null ? "–" : `${Math.round(m * 100)}%`);
 const signed = (n) => `${n < 0 ? "−" : ""}${money(Math.abs(n))}`;
 
-const KM_KEY = "lyons:route-km";
-const loadKm = () => { try { return JSON.parse(window.localStorage.getItem(KM_KEY) || "{}") || {}; } catch { return {}; } };
-
-export default function JobProfit({ jobs = [], settings }) {
-  // A quote with no distance on it gets one worked out from its address (the same lookup as the quote screen's route estimate), once,
-  // and it's remembered on this device. It's only used for the fuel estimate here; nothing is written to the quote.
-  const [kms, setKms] = useState({});
-  useEffect(() => { setKms(loadKm()); }, []);
+export default function JobProfit({ jobs = [], settings, expenses = [], setExpenses }) {
+  // A quote with no distance on it gets one worked out from its address (the same lookup as the quote screen's route estimate), once.
+  // It's remembered in one small System row (so every device and "Ask the hub" use the same figure) and only used for the fuel estimate here;
+  // nothing is written to the quote itself.
+  const kms = useMemo(() => routeKmMap(expenses), [expenses]);
   const need = useMemo(() => jobs.filter((j) => j.quote && !(Number(j.quote.distanceKm) > 0) && String(j.quote.address || "").trim() && kms[j.quote.id] === undefined).map((j) => j.quote), [jobs, kms]);
   useEffect(() => {
     if (!need.length) return undefined;
@@ -29,7 +26,7 @@ export default function JobProfit({ jobs = [], settings }) {
         let km = 0;
         try { km = Number(await estimateRouteDistance([q.address, q.suburb].filter(Boolean).join(", "), q.jobType)) || 0; } catch { km = 0; }
         if (stop) return;
-        setKms((cur) => { const next = { ...cur, [q.id]: km }; try { window.localStorage.setItem(KM_KEY, JSON.stringify(next)); } catch {} return next; });
+        setExpenses?.((es) => [{ id: ROUTE_KM_ID, category: "System", description: JSON.stringify({ ...routeKmMap(es), [q.id]: km }), amount: "0", date: new Date().toISOString().slice(0, 10) }, ...es.filter((e) => e.id !== ROUTE_KM_ID)]);
         await new Promise((r) => setTimeout(r, 1500)); // the map lookup asks for about a second between addresses
       }
     })();
