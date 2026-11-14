@@ -11,7 +11,7 @@ import { parseAvailability, parseNotesAvailability, withAvailability, detectCanc
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { decisionAlert } from "@/lib/push";
-import { foldUpdate } from "@/lib/noteSummary";
+import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
@@ -228,8 +228,8 @@ export async function POST(req) {
   if (!decided && !applied.some((a) => /cancellation|move the visit/.test(a))) {
     // Folded into one running "Updates" line (see lib/noteSummary.js), not added as a line of its own.
     const rel = relevantParts(text, { max: 320 });
-    if (rel) {
-      const folded = await foldUpdate(notes, { text: rel, when: stamp().split(" ").slice(0, 2).join(" ") });
+    if (rel || jobFacts(text).length) {
+      const folded = await foldUpdate(notes, { text: rel || String(text).slice(0, 300), when: stamp().split(" ").slice(0, 2).join(" "), fullText: text });
       if (folded !== notes) {
         notes = folded;
         applied.push("details");

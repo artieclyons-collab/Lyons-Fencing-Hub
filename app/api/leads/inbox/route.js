@@ -19,7 +19,7 @@ import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, decisionAlert, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
-import { foldUpdate } from "@/lib/noteSummary";
+import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
 export const runtime = "nodejs";
