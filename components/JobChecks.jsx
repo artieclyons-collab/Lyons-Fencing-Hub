@@ -35,7 +35,7 @@ export default function JobChecks({ quotes = [], invoices = [], expenses = [], s
     <div className="panel">
       {(
         <>
-          <div className="panel-head"><Palette size={16} /><span>Colorbond colour ({checks.filter((c) => !c.colour).length} to confirm)</span></div>
+          <div className="panel-head"><Palette size={16} /><span>{checks.some((c) => !c.colour) ? `Colorbond colour (${checks.filter((c) => !c.colour).length} to confirm)` : "Colorbond colour: all confirmed"}</span></div>
           {checks.map(({ quote: q, colour, days, urgent }) => (
             <div key={q.id} className="text-row">
               <div className="upcoming-date" style={urgent ? { color: "var(--bad)" } : undefined}>{inDays(days).replace("in ", "").replace(" days", "d")}</div>

@@ -3,11 +3,13 @@
 // who to call) and each quote visit in time order — with directions and a copy-as-text button.
 // It reads the same schedule the Board calendar and iPhone feed use, so it can't disagree with them.
 import { useState, useEffect } from "react";
-import { Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning, Hammer, Users, Navigation, Phone, Copy, Check, Route, FileText } from "lucide-react";
+import { Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning, Hammer, Users, Navigation, Phone, Copy, Check, Route, FileText, Send } from "lucide-react";
 import { addDaysIso } from "@/lib/schedule";
 import { hoursLabel } from "@/lib/jobSchedule";
 import { rainLevel, weatherIcon, RAIN_LABEL } from "@/lib/weather";
 import { hasQuote, quoteTag } from "@/lib/leadQuotes";
+import { smsLink } from "@/lib/introText";
+import { LABOURER } from "@/lib/labourInvoice";
 
 const ICONS = { sun: Sun, partly: CloudSun, cloud: Cloud, fog: CloudFog, drizzle: CloudDrizzle, rain: CloudRain, storm: CloudLightning };
 const mapsTo = (address) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
@@ -56,6 +58,17 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
     for (const { e, l } of visits) lines.push(`${e.time ? clock(e.time) : "no time set"}  ${e.name}${l.jobType ? ` (${l.jobType})` : ""} — ${l.address || e.location || ""}${l.phone ? ` · ${l.phone}` : ""}`);
     return lines.filter((x, i, a) => !(x === "" && (i === 0 || a[i - 1] === ""))).join("\n");
   };
+  // a text to Usher about this job, opened in Messages from your own number for you to check and send
+  const textUsher = ({ e, q }) => {
+    const where = place(q) || e.location || "";
+    const body = `Hey Usher,
+
+${which === "today" ? "Today" : "Tomorrow"} we're at ${where || "the job"}${q.jobType ? ` (${q.jobType.toLowerCase()})` : ""}${e.label ? `, ${e.label}` : ""}. Same start time as usual unless I say otherwise.
+
+Cheers,
+Artie`;
+    window.location.href = smsLink(LABOURER.phone, body);
+  };
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(asText());
@@ -97,6 +110,7 @@ export default function DaySheet({ events, quotes, leads, forecast, go }) {
               {(place(q) || e.location) && <a className="btn-ghost small" href={mapsTo(place(q) || e.location)} target="_blank" rel="noreferrer"><Navigation size={13} /> Directions</a>}
               {q.clientPhone && <a className="btn-ghost small" href={`tel:${q.clientPhone}`}><Phone size={13} /> Call</a>}
               {q.id && <button className="btn-ghost small" onClick={() => go("quotes", { open: { table: "quotes", id: q.id } })}><FileText size={13} /> Open quote</button>}
+              <button className="btn-ghost small" onClick={() => textUsher({ e, q })}><Send size={13} /> Text Usher</button>
             </div>
           </div>
         </div>
