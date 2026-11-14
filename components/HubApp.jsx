@@ -2791,7 +2791,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
 
       <SupplierInvoices jobs={allJobs} expenses={expenses} setExpenses={setExpenses} />
 
-      <JobProfit jobs={jobs} />
+      <JobProfit jobs={jobs} settings={settings} />
 
       <QuoteResults leads={leads} quotes={quotes} />
 
