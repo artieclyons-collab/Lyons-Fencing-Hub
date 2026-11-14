@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Send, Copy, Check, X } from "lucide-react";
 import { smsLink, firstName } from "@/lib/introText";
 
-const SIGN = "Cheers, Artie";
+const SIGN = "Cheers,\nArtie";
 
 // the wordings on offer for each kind of document
 const presets = ({ kind, name, docNumber, total, deposit }) => {
@@ -14,17 +14,17 @@ const presets = ({ kind, name, docNumber, total, deposit }) => {
   const doc = docNumber ? ` (${docNumber})` : "";
   if (kind === "quote") {
     return [
-      { label: "Just emailed the quote", text: `${hi} I've just emailed you the quote${doc}. Have a look when you get a chance, and let me know if you have any questions. If it's not in your inbox, check your junk folder. ${SIGN}` },
-      { label: "Quote, nudge", text: `${hi} Just checking you got the quote${doc} I emailed through. Let me know if you have any questions or would like anything changed. ${SIGN}` },
+      { label: "Just emailed the quote", text: `${hi}\n\nI've just emailed you the quote${doc}. Have a look when you get a chance, and let me know if you have any questions. If it's not in your inbox, check your junk folder.\n\n${SIGN}` },
+      { label: "Quote, nudge", text: `${hi}\n\nJust checking you got the quote${doc} I emailed through. Let me know if you have any questions or would like anything changed.\n\n${SIGN}` },
     ];
   }
   if (kind === "invoice") {
     const what = deposit ? `the deposit invoice${docNumber ? ` ${docNumber}` : ""}` : `invoice${docNumber ? ` ${docNumber}` : ""}`;
     return [
-      { label: "Just emailed the invoice", text: `${hi} I've just emailed you ${what}${total ? ` for ${total}` : ""}. The payment details are on it. Let me know if you have any questions. ${SIGN}` },
+      { label: "Just emailed the invoice", text: `${hi}\n\nI've just emailed you ${what}${total ? ` for ${total}` : ""}. The payment details are on it. Let me know if you have any questions.\n\n${SIGN}` },
     ];
   }
-  return [{ label: "Blank", text: `${hi} ` }];
+  return [{ label: "Blank", text: `${hi}\n\n` }];
 };
 
 export default function TextClientModal({ kind = "lead", name = "", phone = "", docNumber = "", total = "", deposit = false, onClose }) {
