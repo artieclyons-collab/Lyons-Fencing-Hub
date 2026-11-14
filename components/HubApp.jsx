@@ -32,7 +32,7 @@ import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATIO
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
 import TextsToSend from "./TextsToSend";
 import IntroTextModal from "./IntroTextModal";
-import { hasQuote, coveredByQuote, quoteTag } from "@/lib/leadQuotes";
+import { hasQuote, coveredByQuote, quoteTag, sameClientName } from "@/lib/leadQuotes";
 import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
@@ -2228,8 +2228,9 @@ function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes,
           pickOptions={clientOptions({ leads: leads || [], quotes, invoices })}
           phone={(() => {
             const nm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-            const q = (quotes || []).find((x) => x.id === modal.data?.quoteId) || (quotes || []).find((x) => x.clientPhone && nm(x.clientName) === nm(modal.data?.clientName));
-            return q?.clientPhone || "";
+            // only a quote for the same person: Fiona's invoice is linked to Emma's quote, which must not give Emma's number
+            const q = (quotes || []).find((x) => x.id === modal.data?.quoteId && sameClientName(x.clientName, modal.data?.clientName)) || (quotes || []).find((x) => x.clientPhone && nm(x.clientName) === nm(modal.data?.clientName));
+            return q?.clientPhone || (leads || []).find((l) => l.phone && nm(l.name) === nm(modal.data?.clientName))?.phone || "";
           })()}
         />
       )}

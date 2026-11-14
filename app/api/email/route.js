@@ -8,6 +8,7 @@
 // the matching lead) and never comes from the request, only the app's own pages may call it, the same document can't be sent
 // twice within two minutes, and there is a daily limit.
 import { NextResponse } from "next/server";
+import { sameClientName } from "@/lib/leadQuotes";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { renderPdf } from "@/lib/pdf";
 import { buildFilename, money, itemsTotal, gstBreakdown } from "@/lib/logic";
@@ -85,9 +86,10 @@ async function handle(req) {
   const { data: leads } = await supabaseAdmin.from("leads").select("name,phone,email");
   const emailFor = async (rec) => {
     if (isEmail(rec.clientEmail)) return rec.clientEmail.trim();
-    const quote = spec.table === "invoices" && rec.quoteId ? (await supabaseAdmin.from("quotes").select("clientPhone,clientEmail").eq("id", rec.quoteId).maybeSingle()).data : null;
-    if (quote && isEmail(quote.clientEmail)) return quote.clientEmail.trim();
-    const phone = tail(rec.clientPhone || quote?.clientPhone);
+    const quote = spec.table === "invoices" && rec.quoteId ? (await supabaseAdmin.from("quotes").select("clientName,clientPhone,clientEmail").eq("id", rec.quoteId).maybeSingle()).data : null;
+    // (the linked quote only counts when it's for the same person: a neighbour's invoice shares the quote with the client)
+    if (quote && sameClientName(quote.clientName, rec.clientName) && isEmail(quote.clientEmail)) return quote.clientEmail.trim();
+    const phone = tail(rec.clientPhone || (quote && sameClientName(quote.clientName, rec.clientName) ? quote.clientPhone : ""));
     const lead = (leads || []).find((l) => isEmail(l.email) && ((phone.length >= 8 && tail(l.phone) === phone) || norm(l.name) === norm(rec.clientName)));
     return lead?.email?.trim() || "";
   };
