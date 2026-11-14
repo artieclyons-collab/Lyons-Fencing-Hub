@@ -2136,6 +2136,9 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
 function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
   const [showLabour, setShowLabour] = useState(false);
+  useEffect(() => {
+    try { if (window.sessionStorage.getItem("lyons:open-labour")) { window.sessionStorage.removeItem("lyons:open-labour"); setShowLabour(true); } } catch { /* nothing to open */ }
+  }, []);
   const [labourPreview, setLabourPreview] = useState(null);
   const jobAddresses = useMemo(() => [...new Set([...(quotes || []).filter((q) => q.status === "Accepted"), ...invoices].map((i) => [i.address, String(i.suburb || "").replace(/\s+(QLD|NSW)\b.*$/i, "")].filter(Boolean).join(", ")).filter(Boolean))].slice(0, 60), [quotes, invoices]);
   useEffect(() => {
@@ -4010,7 +4013,9 @@ export default function HubApp() {
   // a phone alert can open a particular tab (e.g. /?tab=finances)
   useEffect(() => {
     try {
-      const t = new URLSearchParams(window.location.search).get("tab");
+      const q = new URLSearchParams(window.location.search);
+      const t = q.get("tab");
+      if (q.get("labour")) window.sessionStorage.setItem("lyons:open-labour", "1"); // the Finances tab opens the labourer invoice
       if (t && TABS.some((x) => x.key === t)) { setTab(t); window.history.replaceState(null, "", window.location.pathname); }
     } catch { /* no URL to read */ }
   }, []);
