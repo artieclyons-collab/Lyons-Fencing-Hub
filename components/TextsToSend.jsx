@@ -114,7 +114,7 @@ function WordingModal({ texts, onSave, onClose }) {
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body">
-          <p className="calc-note">Saved on this device. You can use these blanks and they're filled in for each client: <code>{"{name}"}</code> first name, <code>{"{doc}"}</code> quote or invoice number, <code>{"{ago}"}</code> how long ago it was sent, said casually ("a week ago", "a couple of weeks ago"), <code>{"{days}"}</code> the number of days since it was sent, <code>{"{total}"}</code> amount inc. GST, <code>{"{date}"}</code> the start date, <code>{"{link}"}</code> your Google review link, <code>{"{what}"}</code> "invoice INV-123" or "the deposit invoice INV-123", <code>{"{job}"}</code> type of job.</p>
+          <p className="calc-note">Saved on this device. You can use these blanks and they're filled in for each client: <code>{"{name}"}</code> first name, <code>{"{quote}"}</code> "the fencing quote (LFS529)" or, with several out, "the fencing quotes (LFS529 and LFS530)", <code>{"{doc}"}</code> quote or invoice number, <code>{"{ago}"}</code> how long ago it was sent, said casually ("a week ago", "a couple of weeks ago"), <code>{"{days}"}</code> the number of days since it was sent, <code>{"{total}"}</code> amount inc. GST, <code>{"{date}"}</code> the start date, <code>{"{link}"}</code> your Google review link, <code>{"{what}"}</code> "invoice INV-123" or "the deposit invoice INV-123", <code>{"{job}"}</code> type of job.</p>
           <label className="field">
             <span>Quote follow-up</span>
             <textarea rows={4} value={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.value })} />
