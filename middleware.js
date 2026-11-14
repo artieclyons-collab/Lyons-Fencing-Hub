@@ -10,7 +10,7 @@ import { SESSION_COOKIE, passwordSet, sessionToken, safeEqual } from "@/lib/auth
 
 const OPEN = new Set(["/login", "/api/login", "/sw.js", "/manifest.webmanifest", "/logo.png", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png", "/favicon.ico", "/api/labour-pdf"]);
 const HUB_ONLY_CALENDAR = new Set(["/api/calendar/sync", "/api/calendar/link"]);
-const KEY_ROUTES = ["/api/leads/inbox", "/api/leads/inbound-text", "/api/leads/phone-agent"];
+const KEY_ROUTES = ["/api/leads/inbox", "/api/leads/inbound-text", "/api/leads/phone-agent", "/api/ask", "/api/ai/draft-reply", "/api/ai/site-photo"]; // TEMP for testing; /api/ask stays (Siri Shortcut)
 
 const isOpen = (p) =>
   OPEN.has(p) ||

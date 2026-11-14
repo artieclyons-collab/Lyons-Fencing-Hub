@@ -9,8 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Scissors, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical,
-} from "lucide-react";
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical, Sparkles } from "lucide-react";
 
 import {
   JOB_TYPES, LEAD_STATUSES, QUOTE_STATUSES, INVOICE_STATUSES, EXPENSE_CATEGORIES,
@@ -51,6 +50,8 @@ import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
 import JobChecks from "./JobChecks";
 import LeadSources from "./LeadSources";
+import QuoteResults from "./QuoteResults";
+import Assistant from "./Assistant";
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
 // It starts at the day Artie got back to Australia.
@@ -2789,6 +2790,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
 
       <SupplierInvoices jobs={allJobs} expenses={expenses} setExpenses={setExpenses} />
 
+      <QuoteResults leads={leads} quotes={quotes} />
+
       <LeadSources leads={leads} quotes={quotes} expenses={expenses} setExpenses={setExpenses} />
 
       {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} since={from} onClose={() => setBreakdown(null)} />}
@@ -4012,6 +4015,7 @@ const TABS = [
   { key: "materials", label: "Materials", icon: Boxes },
   { key: "shopping", label: "Shopping list", icon: ShoppingCart },
   { key: "finances", label: "Finances", icon: Wallet },
+  { key: "assistant", label: "Assistant", icon: Sparkles },
 ];
 
 export default function HubApp() {
@@ -4191,6 +4195,7 @@ export default function HubApp() {
             {tab === "invoices" && <Invoices leads={leads} invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
+            {tab === "assistant" && <Assistant leads={leads} quotes={quotes} invoices={invoices} setLeads={setLeads} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} leads={leads} />}
           </>
         )}
