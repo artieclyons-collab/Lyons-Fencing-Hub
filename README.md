@@ -375,3 +375,5 @@ How to write them (`parseSiteJobs` in `lib/siteNotes.js`): a paragraph that is o
 
 - **Phone alerts for quote decisions:** a client accepting or declining a quote (the online accept page, a text, or an email) buzzes the phone: "Quote accepted: <name>" / "Quote declined: <name>" (tap opens Quotes). `decisionAlert` in `lib/push.js`, called from `app/api/accept/[id]`, `inbound-text` and `inbox`; it must stay out of `lib/quoteDecision.js`, which the app screens import (web-push is server-only and would break the client build). The accept page only alerts when the status actually changes.
 - **Text Usher:** each job on the Board's Today/Tomorrow sheet has a Text Usher button (opens Messages to his number with the address and job type filled in).
+
+- **More Board reminders:** "N finished jobs with no final invoice yet" (an Accepted job whose last working day passed in the last 6 weeks and has no non-deposit invoice linked by quote id or by its number in the invoice notes) and "quote/invoice number used twice" warnings (a shared number can match an invoice to the wrong quote).

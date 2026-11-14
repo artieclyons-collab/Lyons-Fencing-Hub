@@ -25,7 +25,7 @@ import { lookupPrice, scanJobPhoto, estimateRouteDistance } from "@/lib/ai";
 import { lookupSuburb } from "@/lib/geocode";
 import { scheduleEvents, addDaysIso } from "@/lib/schedule";
 import {
-  estimateHours, hoursLabel, jobDays, suggestSchedule, dayLoads, worksSaturday, isWorkDay, isIsoDate, HOURS_PER_DAY, shiftWorkDays,
+  estimateHours, hoursLabel, jobDays, suggestSchedule, dayLoads, worksSaturday, isWorkDay, isIsoDate, HOURS_PER_DAY, shiftWorkDays, jobEndDate,
 } from "@/lib/jobSchedule";
 import { rainLevel, isWetDay, wetDates, weatherIcon, RAIN_LABEL, WEATHER_LOCATION } from "@/lib/weather";
 import { matchesQuery, quoteText, invoiceText, leadText } from "@/lib/search";
@@ -697,6 +697,37 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
     attention.push({ key: "stale", icon: FileText, tab: "quotes", open: staleQuotes.length === 1 ? { table: "quotes", id: staleQuotes[0].id } : undefined,
       text: `${plural(staleQuotes.length, "quote")} sent over a month ago with no answer`,
       sub: `Mark them Declined if they're dead — ${names(staleQuotes, (q) => q.clientName)}` });
+  }
+  // jobs that should be finished by now (their last working day has passed, within the last 6 weeks) with no final invoice raised
+  const sixWeeksAgo = addDaysIso(t, -42);
+  const finishedNoInvoice = quotes.filter((q) => {
+    if (q.status !== "Accepted" || !isIsoDate(q.startDate)) return false;
+    const end = jobEndDate(q);
+    if (!end || end >= t || end < sixWeeksAgo) return false;
+    return !invoices.some((i) => !isDepositInvoice(i) && (i.quoteId === q.id || (q.docNumber && String(i.notes || "").includes(q.docNumber))));
+  });
+  if (finishedNoInvoice.length > 0) {
+    attention.push({ key: "toinvoice", icon: Receipt, tab: "quotes", open: finishedNoInvoice.length === 1 ? { table: "quotes", id: finishedNoInvoice[0].id } : undefined,
+      text: `${plural(finishedNoInvoice.length, "finished job")} with no final invoice yet`,
+      sub: `Open the quote and tap Create final invoice: ${names(finishedNoInvoice, (q) => q.clientName)}` });
+  }
+  // two quotes (or two invoices) with the same number get mixed up when an invoice is matched to its quote by number
+  const sharedNumbers = (rows) => {
+    const by = new Map();
+    for (const r of rows) if (r.docNumber) by.set(r.docNumber, [...(by.get(r.docNumber) || []), r]);
+    return [...by.entries()].filter(([, rs]) => rs.length > 1);
+  };
+  const dupQuotes = sharedNumbers(quotes.filter((q) => q.status !== "Draft"));
+  const dupInvoices = sharedNumbers(invoices);
+  if (dupQuotes.length > 0) {
+    attention.push({ key: "dupq", icon: AlertTriangle, tab: "quotes",
+      text: `${plural(dupQuotes.length, "quote number")} used twice`,
+      sub: `${dupQuotes.map(([n, rs]) => `${n} (${rs.map((r) => r.clientName).join(" and ")})`).join(", ")}. Give one of each a new number.` });
+  }
+  if (dupInvoices.length > 0) {
+    attention.push({ key: "dupi", icon: AlertTriangle, tab: "invoices",
+      text: `${plural(dupInvoices.length, "invoice number")} used twice`,
+      sub: `${dupInvoices.map(([n, rs]) => `${n} (${rs.map((r) => r.clientName).join(" and ")})`).join(", ")}. Give one of each a new number.` });
   }
   if (lowStock.length > 0) {
     attention.push({ key: "stock", icon: Boxes, tab: "materials",
