@@ -49,6 +49,8 @@ import { clientOptions } from "@/lib/clientPick";
 import { isPalingQuote, palingSide, setPalingSide } from "@/lib/palingSide";
 import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
+import JobChecks from "./JobChecks";
+import LeadSources from "./LeadSources";
 
 // Finances and the Board count jobs that started on or after this date (kept on the device; empty = everything).
 // It starts at the day Artie got back to Australia.
@@ -526,7 +528,7 @@ function ScheduleModal({ quotes, todo, blocked, onApply, onClose }) {
   );
 }
 
-function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads, setQuotes, setInvoices }) {
+function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads, setQuotes, setInvoices, setExpenses }) {
   const t = today();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
@@ -843,6 +845,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       </div>
 
       <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
+
+      <JobChecks quotes={quotes} invoices={invoices} expenses={expenses} setExpenses={setExpenses} />
 
       <PushAlerts />
 
@@ -2669,7 +2673,7 @@ function Clients({ leads, quotes, invoices, go }) {
 }
 
 // ---------- Finances ----------
-function Finances({ invoices, expenses, setExpenses, quotes, materials, settings }) {
+function Finances({ invoices, expenses, setExpenses, quotes, materials, settings, leads }) {
   const [modal, setModal] = useState(null);
   const [breakdown, setBreakdown] = useState(null); // which number was tapped: "income" | "expense" | "net"
 
@@ -2784,6 +2788,8 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
       </details>
 
       <SupplierInvoices jobs={allJobs} expenses={expenses} setExpenses={setExpenses} />
+
+      <LeadSources leads={leads} quotes={quotes} expenses={expenses} setExpenses={setExpenses} />
 
       {breakdown && <FinanceBreakdown metric={breakdown} jobs={jobs} weeks={weeks} totals={totals} since={from} onClose={() => setBreakdown(null)} />}
 
@@ -4177,7 +4183,7 @@ export default function HubApp() {
           <div className="loading">Loading your data…</div>
         ) : (
           <>
-            {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} />}
+            {tab === "dashboard" && <Dashboard leads={leads} quotes={quotes} invoices={invoices} materials={materials} expenses={expenses} go={go} setLeads={setLeads} setQuotes={setQuotes} setInvoices={setInvoices} setExpenses={setExpenses} />}
             {tab === "leads" && <Leads leads={leads} quotes={quotes} setLeads={setLeads} go={go} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
@@ -4185,7 +4191,7 @@ export default function HubApp() {
             {tab === "invoices" && <Invoices leads={leads} invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
-            {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} />}
+            {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} leads={leads} />}
           </>
         )}
       </main>
