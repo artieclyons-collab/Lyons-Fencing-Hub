@@ -44,6 +44,8 @@ import { isSupplierRow, supplierInvoices } from "@/lib/supplierInvoice";
 import SupplierInvoices from "./SupplierInvoices";
 import SplitModal from "./SplitModal";
 import TextClientModal from "./TextClientModal";
+import ClientPicker from "./ClientPicker";
+import { clientOptions } from "@/lib/clientPick";
 import { isPalingQuote, palingSide, setPalingSide } from "@/lib/palingSide";
 import { splitQuote, splitInvoice } from "@/lib/splitDoc";
 import PushAlerts from "./PushAlerts";
@@ -1289,7 +1291,7 @@ function useWetDates() {
   return wet;
 }
 
-function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, pendingOpen, clearOpen, settings, materials, bumpDocNumber, go }) {
+function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pendingNewFrom, clearPending, pendingOpen, clearOpen, settings, materials, bumpDocNumber, go }) {
   const wetDays = useWetDates();
   const [modal, setModal] = useState(null);
   const [quickScanning, setQuickScanning] = useState(false);
@@ -1571,6 +1573,7 @@ function Quotes({ quotes, setQuotes, setLeads, invoices, setInvoices, pendingNew
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={saveAndCreateDeposit}
           allQuotes={quotes}
+          pickOptions={clientOptions({ leads: leads || [], quotes, invoices })}
           depositInvoice={modal.data?.id ? invoices.find((i) => i.quoteId === modal.data.id && isDepositInvoice(i)) : null}
         />
       )}
@@ -1621,7 +1624,7 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onSplit, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
+function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onSplit, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -1817,6 +1820,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 
   return (
     <Modal title={initial?.id ? "Edit quote" : "New quote"} onClose={onClose}>
+      {pickOptions && <ClientPicker options={pickOptions} onPick={(f) => setForm((x) => ({ ...x, clientName: f.clientName || x.clientName, clientPhone: f.clientPhone || "", clientEmail: f.clientEmail || "", address: f.address || "", suburb: f.suburb || "", billName: f.billName || "" }))} />}
       <div className="field-pair">
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Quote #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
@@ -2129,7 +2133,7 @@ function QuoteModal({ initial, settings, materials, onClose, onSave, onSkip, onD
 }
 
 // ---------- Invoices ----------
-function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settings, bumpDocNumber, pendingOpen, clearOpen }) {
+function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
   const [showLabour, setShowLabour] = useState(false);
   const [labourPreview, setLabourPreview] = useState(null);
@@ -2221,6 +2225,7 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
           onPersist={(data) => setInvoices((is) => is.map((i) => (i.id === data.id ? { ...i, ...data } : i)))}
           onSplit={modal.data?.id && modal.data.status !== "Paid" ? split : null}
           nextNumber={previewNumber()}
+          pickOptions={clientOptions({ leads: leads || [], quotes, invoices })}
           phone={(() => {
             const nm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
             const q = (quotes || []).find((x) => x.id === modal.data?.quoteId) || (quotes || []).find((x) => x.clientPhone && nm(x.clientName) === nm(modal.data?.clientName));
@@ -2234,7 +2239,7 @@ function Invoices({ invoices, setInvoices, expenses, setExpenses, quotes, settin
   );
 }
 
-function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber, phone }) {
+function InvoiceModal({ pickOptions, initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber, phone }) {
   const [showEmail, setShowEmail] = useState(false);
   const [textClient, setTextClient] = useState(false);
   const [splitting, setSplitting] = useState(false);
@@ -2270,6 +2275,7 @@ function InvoiceModal({ initial, onClose, onSave, onDelete, onMarkPaid, onPersis
 
   return (
     <Modal title={`${initial?.id ? "Edit" : "New"} ${isDepositInvoice(form) ? "deposit invoice" : "invoice"}`} onClose={onClose}>
+      {pickOptions && <ClientPicker options={pickOptions} onPick={(f) => setForm((x) => ({ ...x, clientName: f.clientName || x.clientName, clientPhone: f.clientPhone || "", clientEmail: f.clientEmail || "", address: f.address || "", suburb: f.suburb || "", billName: f.billName || "" }))} />}
       <div className="field-pair">
         <Field label="Client"><input value={form.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Client name" /></Field>
         <Field label="Invoice #"><input value={form.docNumber || ""} onChange={(e) => set("docNumber", e.target.value)} /></Field>
@@ -4162,8 +4168,8 @@ export default function HubApp() {
             {tab === "leads" && <Leads leads={leads} quotes={quotes} setLeads={setLeads} go={go} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "visits" && <VisitPlanner leads={leads} quotes={quotes} setLeads={setLeads} setQuotes={setQuotes} go={go} />}
             {tab === "clients" && <Clients leads={leads} quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "quotes" && <Quotes quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={docSettings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
-            {tab === "invoices" && <Invoices invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
+            {tab === "quotes" && <Quotes leads={leads} quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={docSettings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
+            {tab === "invoices" && <Invoices leads={leads} invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} />}
