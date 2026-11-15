@@ -53,6 +53,8 @@ import LeadSources from "./LeadSources";
 import QuoteResults from "./QuoteResults";
 import JobProfit from "./JobProfit";
 import TidyUp from "./TidyUp";
+import { variantFromQuote, jobTypeOfQuote, STYLES } from "@/lib/quoteVariant";
+import { checkQuote, leadForQuote } from "@/lib/quoteCheck";
 import AddVisitModal from "./AddVisitModal";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
@@ -1414,6 +1416,12 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
 
   // Opens a fresh, unsaved copy of a quote (what's on screen, including any edits) so a
   // second similar quote for the same client doesn't mean starting from scratch.
+  // The same job in the other material ("my neighbour wants Colorbond instead"): a new draft with that material's own lines, rates and notes
+  const makeVariant = (q, target) => {
+    const v = variantFromQuote(q, target);
+    if (!v) { window.alert("There's no fence on this quote to make a copy of."); return; }
+    setModal({ mode: "new", dupKey: Date.now(), data: { ...v, docNumber: previewNumber(), status: "Draft", date: today(), startDate: "", acceptedAt: null, acceptedByName: null, materialsBreakdown: [], materialsCost: "" } });
+  };
   const duplicate = (q) => {
     const { id: _id, inserted_at: _ins, ...rest } = q;
     setModal({
@@ -1644,6 +1652,8 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
           onSkip={modal.data?._batch && queue.length > 0 ? () => openNextInQueue(false) : null}
           onDelete={modal.data?.id ? () => { remove(modal.data.id); setModal(null); } : null}
           onDuplicate={modal.data?.id ? duplicate : null}
+          onVariant={modal.data?.id ? makeVariant : null}
+          leads={leads}
           onSplit={modal.data?.id ? split : null}
           onFinalInvoice={modal.data?.id ? () => openFinalInvoice(modal.data) : null}
           onCreateDeposit={saveAndCreateDeposit}
@@ -1699,9 +1709,11 @@ function FinalInvoiceModal({ quote, suggestedDeposit, onClose, onCreate }) {
   );
 }
 
-function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onSplit, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
+function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave, onSkip, onDelete, onDuplicate, onVariant, leads = [], onSplit, onFinalInvoice, onCreateDeposit, depositInvoice, allQuotes = [], wetDays = null }) {
   const [form, setForm] = useState({ clientName: "", clientPhone: "", address: "", suburb: "", jobType: JOB_TYPES[0], status: "Draft", date: today(), items: [], jobLength: "", fenceHeight: "1.8", distanceKm: "", employees: "", labourRateType: LABOUR_RATES[0].id, hours: "", removalLength: "", materialsCost: 0, docNumber: "", depositPercent: "10", notes: "", startDate: "", ...initial });
   const [showCalc, setShowCalc] = useState(false);
+  // things that look wrong against what the client said and what you usually charge (warnings only; nothing is changed)
+  const checks = useMemo(() => (form.status === "Accepted" || form.status === "Declined" ? [] : checkQuote(form, { lead: leadForQuote(leads, form), quotes: allQuotes })), [form, leads, allQuotes]);
   const [showPreview, setShowPreview] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
   const [splitting, setSplitting] = useState(false);
@@ -2184,9 +2196,23 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
         />
       )}
 
+      {checks.length > 0 && (
+        <div className="calc-preview" style={{ marginBottom: 12 }}>
+          <div className="cf-label" style={{ marginBottom: 4 }}>Check before sending</div>
+          {checks.map((c, i) => (
+            <div key={i} className="calc-note" style={{ margin: "2px 0", color: c.level === "warn" ? "var(--warn, #c9873a)" : undefined }}>{c.level === "warn" ? "⚠ " : "• "}{c.text}</div>
+          ))}
+        </div>
+      )}
+
       <div className="modal-actions">
         {onDelete && <button className="btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
         {onDuplicate && <button className="btn-ghost" onClick={() => onDuplicate(form)}><Copy size={15} /> Duplicate</button>}
+        {onVariant && ["Colorbond", "Timber fencing"].includes(jobTypeOfQuote(form)) && (
+          <button className="btn-ghost" onClick={() => onVariant(form, jobTypeOfQuote(form) === "Colorbond" ? "Timber fencing" : "Colorbond")} title="Makes a new draft of this job in the other material, with that material's own lines, rates and notes">
+            <Copy size={15} /> Make a {STYLES[jobTypeOfQuote(form) === "Colorbond" ? "Timber fencing" : "Colorbond"].label} version
+          </button>
+        )}
         {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this quote and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}

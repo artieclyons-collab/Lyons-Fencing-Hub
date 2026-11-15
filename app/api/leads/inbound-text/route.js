@@ -11,6 +11,7 @@ import { parseAvailability, parseNotesAvailability, withAvailability, detectCanc
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { decisionAlert } from "@/lib/push";
+import { draftAlternativeQuote } from "@/lib/variantDraft";
 import { detectVisitRequest, visitWantedLine, VISIT_WANTED, NO_VISIT } from "@/lib/visitRequest";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
@@ -227,6 +228,12 @@ export async function POST(req) {
       applied.push("site visit wanted");
       try { await sendPush(supabaseAdmin, { title: `Wants a visit: ${lead.name}`, body: visit.by ? `Asked you to come and look by ${visit.by}. It's on the Visit planner.` : "Asked you to come and look. It's on the Visit planner.", tag: `visit-${lead.id}`, url: "/?tab=visits" }); } catch {}
     }
+  }
+
+  // "My neighbour wants Colorbond instead": the other-material quote is drafted from the one already sent (never sent by itself)
+  if (!decided) {
+    const alt = await draftAlternativeQuote({ db: supabaseAdmin, lead: { ...lead, notes }, text });
+    if (alt?.noteLine) { notes = [notes.trim(), alt.noteLine].filter(Boolean).join("\n"); applied.push("other-material quote drafted"); }
   }
 
   const mood = detectCancellation(text);

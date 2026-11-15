@@ -20,6 +20,7 @@ import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, decisionAlert, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
+import { draftAlternativeQuote } from "@/lib/variantDraft";
 import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
 export const runtime = "nodejs";
@@ -252,6 +253,9 @@ export async function POST(req) {
             const base = patch.notes ?? String(lead.notes || "");
             const folded = await foldUpdate(base, { ...change.fold, fullText: cleanBody(e.text) });
             if (folded !== base) { patch.notes = folded.slice(-4000); applied.push("details"); }
+            // "My neighbour wants Colorbond instead": the other-material quote is drafted from the one already sent (never sent by itself)
+            const alt = await draftAlternativeQuote({ db: supabaseAdmin, lead: { ...lead, notes: patch.notes ?? base }, text: cleanBody(e.text) });
+            if (alt?.noteLine) { patch.notes = [String(patch.notes ?? base).trim(), alt.noteLine].filter(Boolean).join("\n").slice(-4000); applied.push("other-material quote drafted"); }
           }
         }
         if (!applied.length && !dec) continue;
