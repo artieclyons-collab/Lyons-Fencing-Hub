@@ -9,7 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Scissors, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical, Sparkles } from "lucide-react";
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical, Sparkles, Upload } from "lucide-react";
 
 import {
   JOB_TYPES, LEAD_STATUSES, QUOTE_STATUSES, INVOICE_STATUSES, EXPENSE_CATEGORIES,
@@ -57,6 +57,8 @@ import { variantFromQuote, jobTypeOfQuote, STYLES } from "@/lib/quoteVariant";
 import { checkQuote, leadForQuote } from "@/lib/quoteCheck";
 import AddVisitModal from "./AddVisitModal";
 import PaymentMatch from "./PaymentMatch";
+import PriceListUpdate from "./PriceListUpdate";
+import JobPhotos from "./JobPhotos";
 import MondayBrief from "./MondayBrief";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
@@ -2200,6 +2202,8 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
         />
       )}
 
+      {initial?.id && form.status === "Accepted" && <JobPhotos quote={form} />}
+
       {checks.length > 0 && (
         <div className="calc-preview" style={{ marginBottom: 12 }}>
           <div className="cf-label" style={{ marginBottom: 4 }}>Check before sending</div>
@@ -2533,6 +2537,7 @@ function BulkAddMaterialsModal({ onClose, onApply }) {
 function Materials({ materials, setMaterials }) {
   const [modal, setModal] = useState(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [priceListOpen, setPriceListOpen] = useState(false);
   const save = (data) => {
     if (data.id) setMaterials((ms) => ms.map((m) => (m.id === data.id ? data : m)));
     else setMaterials((ms) => [{ ...data, id: uid() }, ...ms]);
@@ -2555,6 +2560,9 @@ function Materials({ materials, setMaterials }) {
           <p>What your materials cost. The quote calculator and Finances use these prices.</p>
         </div>
         <div className="btn-stack">
+          <button className="btn-ghost" onClick={() => setPriceListOpen(true)} title="Add a supplier price list and update your prices from it">
+            <Upload size={16} /> Update prices
+          </button>
           <button className="btn-ghost" onClick={() => setBulkOpen(true)}>
             <ClipboardPaste size={16} /> Bulk add
           </button>
@@ -2593,6 +2601,7 @@ function Materials({ materials, setMaterials }) {
         />
       )}
       {bulkOpen && <BulkAddMaterialsModal onClose={() => setBulkOpen(false)} onApply={applyBulk} />}
+      {priceListOpen && <PriceListUpdate materials={materials} setMaterials={setMaterials} onClose={() => setPriceListOpen(false)} />}
     </div>
   );
 }

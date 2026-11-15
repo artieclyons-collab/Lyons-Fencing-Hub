@@ -16,6 +16,8 @@ const isOpen = (p) =>
   OPEN.has(p) ||
   p.startsWith("/accept/") ||
   p.startsWith("/api/accept/") ||
+  p.startsWith("/done/") ||
+  p.startsWith("/api/done/") ||
   (p.startsWith("/api/calendar/") && !HUB_ONLY_CALENDAR.has(p));
 
 export async function middleware(req) {
