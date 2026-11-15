@@ -250,7 +250,7 @@ export async function POST(req) {
             seenList.push(mid);
             seenChanged = true;
             const base = patch.notes ?? String(lead.notes || "");
-            const folded = await foldUpdate(base, change.fold);
+            const folded = await foldUpdate(base, { ...change.fold, fullText: cleanBody(e.text) });
             if (folded !== base) { patch.notes = folded.slice(-4000); applied.push("details"); }
           }
         }
@@ -266,6 +266,7 @@ export async function POST(req) {
         if (patch.name) await renameClient(supabaseAdmin, lead, patch.name);
         Object.assign(lead, patch);
         updated.push(`${lead.name} (${applied.join(", ")})`);
+        if (applied.includes("site visit wanted")) alerts.push({ title: `Wants a visit: ${lead.name}`, body: "Asked you to come and look. It's on the Visit planner.", tag: `visit-${lead.id}`, url: "/?tab=visits" });
         console.log(`inbox: lead updated from an email (${applied.join(", ")})`);
         continue;
       }

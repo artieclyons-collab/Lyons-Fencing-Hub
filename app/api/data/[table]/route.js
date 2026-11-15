@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { TABLE_COLUMNS, sanitizeRow } from "@/lib/tableSchema";
 
@@ -6,8 +7,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_TABLES = new Set(Object.keys(TABLE_COLUMNS));
-// Data changes constantly (and from several devices) — never let a browser or CDN reuse an old copy.
+// Data changes constantly (and from several devices), so an old copy is never reused: the browser must ask first, and the answer is a
+// tiny "304 not modified" when nothing has changed (the ETag is a fingerprint of the rows). That keeps the once-a-few-minutes refresh from
+// downloading the whole hub every time, which is what used up Vercel's free data allowance.
 const NO_STORE = { headers: { "Cache-Control": "no-store" } };
+function revalidated(req, rows) {
+  const body = JSON.stringify({ rows });
+  const etag = `"${crypto.createHash("sha1").update(body).digest("hex").slice(0, 20)}"`;
+  const headers = { "Cache-Control": "private, no-cache", ETag: etag };
+  if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+  return new Response(body, { status: 200, headers: { ...headers, "Content-Type": "application/json" } });
+}
 
 export async function GET(req, { params }) {
   const { table } = await params;
@@ -17,12 +27,12 @@ export async function GET(req, { params }) {
   if (table === "settings") {
     const { data, error } = await supabaseAdmin.from("settings").select("*").limit(1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ rows: data || [] }, NO_STORE);
+    return revalidated(req, data || []);
   }
 
   const { data, error } = await supabaseAdmin.from(table).select("*").order("inserted_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ rows: data || [] }, NO_STORE);
+  return revalidated(req, data || []);
 }
 
 export async function PUT(req, { params }) {

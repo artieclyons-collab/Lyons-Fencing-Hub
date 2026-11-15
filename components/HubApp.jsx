@@ -53,6 +53,8 @@ import LeadSources from "./LeadSources";
 import QuoteResults from "./QuoteResults";
 import JobProfit from "./JobProfit";
 import TidyUp from "./TidyUp";
+import AddVisitModal from "./AddVisitModal";
+import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
 
 const nOf = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`; // "3 drafts", "1 draft"
@@ -2515,7 +2517,7 @@ function Materials({ materials, setMaterials }) {
       <div className="section-head row">
         <div>
           <h1>Materials</h1>
-          <p>Stock on hand — posts, panels, concrete, fixings, whatever you track.</p>
+          <p>What your materials cost. The quote calculator and Finances use these prices.</p>
         </div>
         <div className="btn-stack">
           <button className="btn-ghost" onClick={() => setBulkOpen(true)}>
@@ -2537,7 +2539,8 @@ function Materials({ materials, setMaterials }) {
               <div className="row-card" key={m.id} onClick={() => setModal({ mode: "edit", data: m })}>
                 <div className="row-card-main">
                   <div className="row-card-title">{m.name}</div>
-                  <div className="row-card-meta">{m.qtyOnHand} {m.unit} on hand · reorder at {m.reorderLevel} · {money(m.costPerUnit)}/{m.unit}</div>
+                  {/* stock is only shown for items where it's actually tracked (nothing says "0 on hand · reorder at 0") */}
+                  <div className="row-card-meta">{[Number(m.qtyOnHand) > 0 || Number(m.reorderLevel) > 0 ? `${m.qtyOnHand} ${m.unit} on hand${Number(m.reorderLevel) > 0 ? ` · reorder at ${m.reorderLevel}` : ""}` : "", `${money(m.costPerUnit)}/${m.unit}`].filter(Boolean).join(" · ")}</div>
                 </div>
                 {low && <Tag label="Low stock" />}
               </div>
@@ -2612,8 +2615,9 @@ function MaterialModal({ initial, onClose, onSave, onDelete }) {
 }
 
 // ---------- Shopping list (materials needed, per job) ----------
-function ShoppingList({ quotes, go }) {
-  const jobs = quotes
+function ShoppingList({ quotes, invoices = [], go }) {
+  const [showFinished, setShowFinished] = useState(false);
+  const all = quotes
     .filter((q) => q.status === "Accepted")
     .sort((a, b) => {
       if (a.startDate && b.startDate) return a.startDate.localeCompare(b.startDate);
@@ -2621,6 +2625,12 @@ function ShoppingList({ quotes, go }) {
       if (b.startDate) return 1;
       return 0;
     });
+  // Only jobs still to buy for: not yet invoiced in full, and not started more than a week ago. The finished ones are one tap away.
+  const weekAgo = addDaysIso(today(), -7);
+  const isFinished = (q) => invoices.some((i) => !isDepositInvoice(i) && (i.quoteId === q.id || (q.docNumber && String(i.notes || "").includes(q.docNumber)))) || (isIsoDate(q.startDate) && q.startDate < weekAgo);
+  const upcoming = all.filter((q) => !isFinished(q));
+  const finishedCount = all.length - upcoming.length;
+  const jobs = showFinished ? all : upcoming;
 
   return (
     <div>
@@ -2629,8 +2639,13 @@ function ShoppingList({ quotes, go }) {
         <p>Materials to buy for each upcoming job — one list per job, from the material calculator on each quote.</p>
       </div>
 
+      {finishedCount > 0 && (
+        <button type="button" className="link-btn" style={{ marginBottom: 12 }} onClick={() => setShowFinished((v) => !v)}>
+          {showFinished ? "Hide finished jobs" : `Show ${finishedCount} finished ${finishedCount === 1 ? "job" : "jobs"}`}
+        </button>
+      )}
       {jobs.length === 0 ? (
-        <EmptyState icon={ShoppingCart} title="No upcoming jobs" hint="Accepted quotes with a materials breakdown show up here, one list per job." />
+        <EmptyState icon={ShoppingCart} title="No upcoming jobs" hint="Accepted quotes with a materials breakdown show up here, one list per job. Finished jobs are tucked away above." />
       ) : (
         <div className="list">
           {jobs.map((q) => {
@@ -3446,8 +3461,25 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
   const [askRemove, setAskRemove] = useState(null); // stop id waiting for "mark lost / delete / keep"
   const todayLabel = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "short" });
   // Cancelling: "lost" keeps the lead (greyed out, with a note) and takes it out of the plan; "delete" removes it completely.
+  // ----- adding a visit by hand, and taking one off the planner without touching the lead's status -----
+  const [adding, setAdding] = useState(false);
+  const stripLine = (notes, re) => String(notes || "").split("\n").filter((ln) => !re.test(ln)).join("\n").trim();
+  const addVisit = (f) => {
+    const wantedNote = (notes) => [stripLine(notes, new RegExp(NO_VISIT.source, "i")), VISIT_WANTED.test(String(notes || "")) ? "" : "Site visit wanted."].filter(Boolean).join("\n");
+    if (f.leadId) {
+      setLeads((rows) => rows.map((l) => (l.id === f.leadId ? { ...l, address: l.address || f.address, phone: l.phone || f.phone, visitDate: f.visitDate || null, visitTime: f.visitDate ? f.visitTime || null : null, notes: wantedNote(l.notes) } : l)));
+    } else {
+      setLeads((rows) => [{ id: uid(), name: f.name, phone: f.phone, email: "", address: f.address, jobType: "Other", status: "Contacted", notes: "Site visit wanted.", createdAt: today(), source: "visit", visitDate: f.visitDate || null, visitTime: f.visitDate ? f.visitTime || null : null }, ...rows]);
+    }
+    setAdding(false);
+    setNote(`${f.name} is on the planner${f.visitDate ? ` for ${dayTitleLong(f.visitDate)}` : "; it will find the best day"}.`);
+  };
   const removeVisit = (s, how) => {
-    if (how === "delete") {
+    if (how === "skip") {
+      // off the planner only: the lead keeps its status, notes and details
+      setLeads((rows) => rows.map((l) => (l.id === s.leadId ? { ...l, visitDate: null, visitTime: null, notes: [stripLine(l.notes, new RegExp(VISIT_WANTED.source, "i")), NO_VISIT_LINE].filter(Boolean).join("\n") } : l)));
+      setNote(`${s.name} is off the planner. They're still in your Leads.`);
+    } else if (how === "delete") {
       setLeads((rows) => rows.filter((l) => l.id !== s.leadId));
       setNote(`Deleted ${s.name} from your leads — they're out of the plan.`);
     } else {
@@ -3642,7 +3674,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
     const v = dayView(d);
     const addrs = v.entries.map((e) => d.stops.find((x) => x.id === e.id).query);
     if (addrs.length === 0) return null;
-    const origin = encodeURIComponent(d.settings.start === "job" && d.job ? d.job.query : `${PLACES[d.settings.start]?.name.split(" (")[0] || "Cleveland"} QLD`);
+    const origin = encodeURIComponent(d.settings.start === "job" && d.job ? d.job.query : HOME.query);
     const dest = encodeURIComponent(HOME.query);
     const way = addrs.map(encodeURIComponent).join("%7C");
     return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}${way ? `&waypoints=${way}` : ""}&travelmode=driving`;
@@ -3699,12 +3731,13 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
         {askRemove === s.id ? (
           <span className="vp-confirm">
             Take {firstName(s.name) || "them"} out?
-            <button className="btn-primary small" onClick={() => removeVisit(s, "lost")} title="Keeps the lead, marked Lost">Mark lost</button>
+            <button className="btn-primary small" onClick={() => removeVisit(s, "skip")} title="Takes this visit off the planner; the lead stays as it is">Not needed</button>
+            <button className="btn-ghost small" onClick={() => removeVisit(s, "lost")} title="Keeps the lead, marked Lost">Mark lost</button>
             <button className="btn-danger small" onClick={() => removeVisit(s, "delete")} title="Removes the lead completely">Delete</button>
             <button className="btn-ghost small" onClick={() => setAskRemove(null)}>Keep</button>
           </span>
         ) : (
-          <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Cancelled</button>
+          <button className="btn-ghost small" onClick={() => setAskRemove(s.id)}><X size={13} /> Remove</button>
         )}
         {s.leadId && <button className="btn-primary small" onClick={() => setMoveFor({ stop: s, fromDate: dd.date })} title="Move this visit to another day, or set a time"><Route size={13} /> Move…</button>}
         {!dd.saturday && dd.stops.length + dd.midday.length > 1 && (
@@ -3719,13 +3752,17 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
 
   return (
     <div>
-      <div className="section-head">
-        <h1>Visit planner</h1>
-        <p>Works out the best order and times for your quote visits, north to south, with real driving times. Leads with a ? after the name are left out until they confirm.</p>
+      <div className="section-head row">
+        <div>
+          <h1>Visit planner</h1>
+          <p>Works out the best order and times for your quote visits, from home or from the job you're on, with real driving times. Leads with a ? after the name are left out until they confirm. A client who asks you to come and look gets added automatically.</p>
+        </div>
+        <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={16} /> Add a visit</button>
       </div>
+      {adding && <AddVisitModal leads={leads} onSave={addVisit} onClose={() => setAdding(false)} />}
 
       {allStops.length === 0 && (
-        <EmptyState icon={Route} title="No visits to plan" hint="Give a lead an address and a site visit date (Leads tab) and it shows up here. A lead with an address but no date gets placed on the best day." />
+        <EmptyState icon={Route} title="No visits to plan" hint="Tap Add a visit, or give a lead an address (Leads tab) and it shows up here. A lead with an address but no date gets placed on the best day." />
       )}
 
       {lookingUp && (
@@ -3893,7 +3930,7 @@ function VisitPlanner({ leads, quotes, setLeads, setQuotes, go }) {
             <Field label="Starting from">
               <select value={d.settings.start} onChange={(e) => setDaySetting({ start: e.target.value })}>
                 {d.job && <option value="job">{d.job.name}'s job site</option>}
-                {Object.values(PLACES).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
+                {Object.values(PLACES).filter((p) => !p.hidden).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
               </select>
             </Field>
             {d.settings.start === "job" ? (
@@ -4266,7 +4303,7 @@ export default function HubApp() {
             {tab === "quotes" && <Quotes leads={leads} quotes={quotes} setQuotes={setQuotes} setLeads={setLeads} invoices={invoices} setInvoices={setInvoices} pendingNewFrom={pendingNewFrom} clearPending={() => setPendingNewFrom(null)} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} settings={docSettings} materials={materials} bumpDocNumber={bumpDocNumber} go={go} />}
             {tab === "invoices" && <Invoices leads={leads} invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
-            {tab === "shopping" && <ShoppingList quotes={quotes} go={go} />}
+            {tab === "shopping" && <ShoppingList quotes={quotes} invoices={invoices} go={go} />}
             {tab === "assistant" && <Assistant leads={leads} quotes={quotes} invoices={invoices} setLeads={setLeads} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} leads={leads} />}
           </>

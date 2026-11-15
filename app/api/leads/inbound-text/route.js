@@ -11,6 +11,7 @@ import { parseAvailability, parseNotesAvailability, withAvailability, detectCanc
 import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { decisionAlert } from "@/lib/push";
+import { detectVisitRequest, visitWantedLine, VISIT_WANTED, NO_VISIT } from "@/lib/visitRequest";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
@@ -215,6 +216,16 @@ export async function POST(req) {
     if (withNew !== notes) {
       notes = withNew;
       applied.push("availability");
+    }
+  }
+
+  // "Could you come out and have a look at the quote in person this week?": a site visit to plan, by the day they asked for
+  if (!decided) {
+    const visit = detectVisitRequest(text, new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date()));
+    if (visit && !VISIT_WANTED.test(notes) && !NO_VISIT.test(notes)) {
+      notes = [notes.trim(), visitWantedLine(visit.by)].filter(Boolean).join("\n");
+      applied.push("site visit wanted");
+      try { await sendPush(supabaseAdmin, { title: `Wants a visit: ${lead.name}`, body: visit.by ? `Asked you to come and look by ${visit.by}. It's on the Visit planner.` : "Asked you to come and look. It's on the Visit planner.", tag: `visit-${lead.id}`, url: "/?tab=visits" }); } catch {}
     }
   }
 
