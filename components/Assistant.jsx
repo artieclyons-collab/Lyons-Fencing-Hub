@@ -2,8 +2,8 @@
 // The Assistant tab: ask the hub a question (typed or spoken), size up a job from photos, write a reply to a client's email, and write a
 // reply to a Google review. The thinking happens in server routes (app/api/ask, app/api/ai/*) so the Anthropic key never reaches the phone.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, MicOff, Send, Camera, Mail, Star, Copy, Check, Volume2, VolumeX, X, Trash2, Sparkles } from "lucide-react";
-import { money, itemsTotal, gstBreakdown } from "@/lib/logic";
+import { Mic, MicOff, Send, Camera, Mail, Star, Copy, Check, Volume2, VolumeX, X, Trash2, Sparkles, FileText } from "lucide-react";
+import { money, itemsTotal, gstBreakdown, uid, today } from "@/lib/logic";
 import { canListen, canSpeak, listen, speak, stopSpeaking, unlockSpeech, onVoicesReady, pickVoice, chooseVoice } from "@/lib/voice";
 import { clientOptions, searchClients } from "@/lib/clientPick";
 import { quotesForLead } from "@/lib/quoteDecision";
@@ -339,15 +339,102 @@ function ReviewReply() {
   );
 }
 
+// ---------------- Site notes (dictate on site) ----------------
+function SiteNotes({ leads, setLeads, go }) {
+  const [said, setSaid] = useState("");
+  const [tidy, setTidy] = useState(null); // { notes, unclear }
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [listening, setListening] = useState(false);
+  const [mic, setMic] = useState(false);
+  const rec = useRef(null);
+  const [leadId, setLeadId] = useState("");
+  const [fresh, setFresh] = useState({ name: "", address: "", phone: "" });
+  const [saved, setSaved] = useState(null); // the lead the notes went onto
+  useEffect(() => { setMic(canListen()); return () => rec.current?.stop(); }, []);
+
+  const toggleMic = () => {
+    if (listening) { rec.current?.stop(); return; }
+    setError("");
+    setListening(true);
+    let last = "";
+    rec.current = listen({
+      onText: (t) => { last = t; },
+      onEnd: () => { setListening(false); if (last) setSaid((v) => `${v}${v && !/\s$/.test(v) ? " " : ""}${last}`); },
+      onError: () => { setListening(false); setError("Listening didn't work here. Use the microphone key on your keyboard instead."); },
+    });
+  };
+  const run = async () => {
+    setBusy(true); setError(""); setTidy(null); setSaved(null);
+    try { setTidy(await post("/api/ai/clean-notes", { text: said })); } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  const save = () => {
+    const notes = String(tidy?.notes || "").trim();
+    if (!notes) return;
+    let lead;
+    if (leadId) {
+      const l = leads.find((x) => x.id === leadId);
+      lead = { ...l, notes: [String(l.notes || "").trim(), notes].filter(Boolean).join("\n") }; // one new line, not a blank one: a blank line would start a separate quote
+      setLeads((rows) => rows.map((x) => (x.id === leadId ? lead : x)));
+    } else {
+      lead = { id: uid(), name: fresh.name.trim(), phone: fresh.phone.trim(), email: "", address: fresh.address.trim(), jobType: "Other", status: "Contacted", notes, createdAt: today(), source: "site notes" };
+      setLeads((rows) => [lead, ...rows]);
+    }
+    setSaved(lead);
+  };
+  const canSave = !!tidy?.notes?.trim() && (leadId || fresh.name.trim());
+
+  return (
+    <div>
+      <p className="calc-note" style={{ marginTop: 0 }}>Say or type what you saw on site. It's tidied into the short lines the quote builder reads, then added to a lead. It only tidies what you said: it never adds a measurement or a price.</p>
+      <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+        <textarea className="li-desc" rows={4} style={{ flex: 1, minWidth: 0 }} placeholder="e.g. twenty six metres of colorbond two metres high, take out the old fence, one gate, tree at the end" value={said} onChange={(e) => setSaid(e.target.value)} />
+        {mic && <button type="button" className={listening ? "btn-primary" : "btn-ghost"} onClick={toggleMic} aria-label={listening ? "Stop listening" : "Dictate"}>{listening ? <MicOff size={18} /> : <Mic size={18} />}</button>}
+      </div>
+      {!mic && <p className="calc-note">To talk instead of type: tap the box and use the microphone key on your keyboard.</p>}
+      <div className="calc-trigger-row" style={{ marginTop: 8 }}>
+        <button type="button" className="btn-primary" disabled={busy || !said.trim()} onClick={run}><Sparkles size={15} /> {busy ? "Tidying…" : "Tidy it up"}</button>
+      </div>
+      {error && <p className="calc-note" style={{ color: "var(--bad)" }}>{error}</p>}
+      {tidy && (
+        <div style={{ marginTop: 12 }}>
+          <label className="field"><span>Tidied notes (edit if needed)</span><textarea rows={6} value={tidy.notes} onChange={(e) => setTidy({ ...tidy, notes: e.target.value })} /></label>
+          {tidy.unclear?.length > 0 && <p className="calc-note" style={{ color: "var(--warn, #c9873a)" }}>Not clear, so left out: {tidy.unclear.join(" · ")}</p>}
+          <label className="field">
+            <span>Add to</span>
+            <select value={leadId} onChange={(e) => { setLeadId(e.target.value); setSaved(null); }}>
+              <option value="">A new lead…</option>
+              {leads.filter((l) => l.status !== "Lost").map((l) => <option key={l.id} value={l.id}>{l.name}{l.address ? ` · ${l.address}` : ""}</option>)}
+            </select>
+          </label>
+          {!leadId && (
+            <>
+              <label className="field"><span>Name</span><input value={fresh.name} onChange={(e) => setFresh({ ...fresh, name: e.target.value })} /></label>
+              <label className="field"><span>Address</span><input value={fresh.address} onChange={(e) => setFresh({ ...fresh, address: e.target.value })} /></label>
+              <label className="field"><span>Mobile (optional)</span><input inputMode="tel" value={fresh.phone} onChange={(e) => setFresh({ ...fresh, phone: e.target.value })} /></label>
+            </>
+          )}
+          <div className="calc-trigger-row">
+            <button type="button" className="btn-primary" disabled={!canSave || !!saved} onClick={save}>{saved ? <><Check size={15} /> Added</> : "Add to lead"}</button>
+            {saved && go && <button type="button" className="btn-ghost" onClick={() => go("quotes", { newFromLead: saved })}><FileText size={15} /> Start the quote</button>}
+            <CopyBtn text={tidy.notes} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------- the tab ----------------
 const SECTIONS = [
   { key: "ask", label: "Ask the hub", icon: Mic },
+  { key: "notes", label: "Site notes", icon: FileText },
   { key: "photo", label: "Photo estimate", icon: Camera },
   { key: "email", label: "Reply to email", icon: Mail },
   { key: "review", label: "Review reply", icon: Star },
 ];
 
-export default function Assistant({ leads = [], quotes = [], invoices = [], setLeads }) {
+export default function Assistant({ leads = [], quotes = [], invoices = [], setLeads, go }) {
   const [section, setSection] = useState("ask");
   return (
     <div>
@@ -357,6 +444,7 @@ export default function Assistant({ leads = [], quotes = [], invoices = [], setL
       </div>
       <div className="panel">
         {section === "ask" && <Ask />}
+        {section === "notes" && <SiteNotes leads={leads} setLeads={setLeads} go={go} />}
         {section === "photo" && <Photo leads={leads} setLeads={setLeads} />}
         {section === "email" && <EmailReply leads={leads} quotes={quotes} invoices={invoices} />}
         {section === "review" && <ReviewReply />}

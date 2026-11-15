@@ -56,6 +56,8 @@ import TidyUp from "./TidyUp";
 import { variantFromQuote, jobTypeOfQuote, STYLES } from "@/lib/quoteVariant";
 import { checkQuote, leadForQuote } from "@/lib/quoteCheck";
 import AddVisitModal from "./AddVisitModal";
+import PaymentMatch from "./PaymentMatch";
+import MondayBrief from "./MondayBrief";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
 
@@ -803,6 +805,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
           </button>
         ))}
       </div>
+
+      <MondayBrief expenses={expenses} />
 
       <div className="panel">
         <div className="panel-head">
@@ -2237,6 +2241,7 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
 function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes, settings, bumpDocNumber, pendingOpen, clearOpen }) {
   const [modal, setModal] = useState(null);
   const [showLabour, setShowLabour] = useState(false);
+  const [matching, setMatching] = useState(false);
   useEffect(() => {
     try { if (window.sessionStorage.getItem("lyons:open-labour")) { window.sessionStorage.removeItem("lyons:open-labour"); setShowLabour(true); } } catch { /* nothing to open */ }
   }, []);
@@ -2285,6 +2290,9 @@ function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes,
           <p>What's been billed, and what's still owing.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn-ghost" onClick={() => setMatching(true)} title="Add your bank transactions and tick off the invoices that have been paid">
+            <Check size={15} /> Match payments
+          </button>
           <button className="btn-ghost" onClick={() => setShowLabour(true)} title="Make the invoice your labourer sends you for his days and hours">
             <Hammer size={15} /> Labourer invoice
           </button>
@@ -2340,6 +2348,7 @@ function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes,
           })()}
         />
       )}
+      {matching && <PaymentMatch invoices={invoices} setInvoices={setInvoices} onClose={() => setMatching(false)} />}
       {showLabour && <LabourInvoice addresses={jobAddresses} expenses={expenses} setExpenses={setExpenses} onClose={() => setShowLabour(false)} onPreview={setLabourPreview} />}
       {labourPreview && <DocumentPreviewModal type="labour" data={labourPreview} onClose={() => setLabourPreview(null)} />}
     </div>
@@ -4330,7 +4339,7 @@ export default function HubApp() {
             {tab === "invoices" && <Invoices leads={leads} invoices={invoices} setInvoices={setInvoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} settings={docSettings} bumpDocNumber={bumpDocNumber} pendingOpen={pendingOpen} clearOpen={() => setPendingOpen(null)} />}
             {tab === "materials" && <Materials materials={materials} setMaterials={setMaterials} />}
             {tab === "shopping" && <ShoppingList quotes={quotes} invoices={invoices} go={go} />}
-            {tab === "assistant" && <Assistant leads={leads} quotes={quotes} invoices={invoices} setLeads={setLeads} />}
+            {tab === "assistant" && <Assistant leads={leads} quotes={quotes} invoices={invoices} setLeads={setLeads} go={go} />}
             {tab === "finances" && <Finances invoices={invoices} expenses={expenses} setExpenses={setExpenses} quotes={quotes} materials={materials} settings={settings} leads={leads} />}
           </>
         )}

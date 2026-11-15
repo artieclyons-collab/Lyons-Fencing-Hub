@@ -12,6 +12,7 @@ import { detectEnquiry, localPhone, extractAddress } from "@/lib/enquiry";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { decisionAlert } from "@/lib/push";
 import { draftAlternativeQuote } from "@/lib/variantDraft";
+import { triageMessage } from "@/lib/triage";
 import { detectVisitRequest, visitWantedLine, VISIT_WANTED, NO_VISIT } from "@/lib/visitRequest";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName";
@@ -234,6 +235,11 @@ export async function POST(req) {
   if (!decided) {
     const alt = await draftAlternativeQuote({ db: supabaseAdmin, lead: { ...lead, notes }, text });
     if (alt?.noteLine) { notes = [notes.trim(), alt.noteLine].filter(Boolean).join("\n"); applied.push("other-material quote drafted"); }
+    // "I've paid", "can you start earlier", "there's a problem": noted on the lead and buzzed to the phone so it doesn't get missed
+    if (!alt?.noteLine && !applied.includes("site visit wanted")) {
+      const tri = await triageMessage({ db: supabaseAdmin, lead: { ...lead, notes }, text });
+      if (tri?.noteLine) { notes = [notes.trim(), tri.noteLine].filter(Boolean).join("\n"); applied.push(`flagged: ${tri.intent.replace("_", " ")}`); }
+    }
   }
 
   const mood = detectCancellation(text);

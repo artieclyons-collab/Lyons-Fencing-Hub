@@ -21,6 +21,8 @@ import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, decisionAlert, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { draftAlternativeQuote } from "@/lib/variantDraft";
+import { triageMessage } from "@/lib/triage";
+import { mondayBrief } from "@/lib/brief";
 import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
 export const runtime = "nodejs";
@@ -256,6 +258,11 @@ export async function POST(req) {
             // "My neighbour wants Colorbond instead": the other-material quote is drafted from the one already sent (never sent by itself)
             const alt = await draftAlternativeQuote({ db: supabaseAdmin, lead: { ...lead, notes: patch.notes ?? base }, text: cleanBody(e.text) });
             if (alt?.noteLine) { patch.notes = [String(patch.notes ?? base).trim(), alt.noteLine].filter(Boolean).join("\n").slice(-4000); applied.push("other-material quote drafted"); }
+            // "I've paid", "can you start earlier", "there's a problem": noted on the lead and buzzed to the phone so it doesn't get missed
+            if (!alt?.noteLine && !applied.includes("site visit wanted")) {
+              const tri = await triageMessage({ db: supabaseAdmin, lead: { ...lead, notes: patch.notes ?? base }, text: cleanBody(e.text) });
+              if (tri?.noteLine) { patch.notes = [String(patch.notes ?? base).trim(), tri.noteLine].filter(Boolean).join("\n").slice(-4000); applied.push(`flagged: ${tri.intent.replace("_", " ")}`); }
+            }
           }
         }
         if (!applied.length && !dec) continue;
@@ -326,6 +333,7 @@ export async function POST(req) {
       await nudgeUnanswered(supabaseAdmin);
       await dailyTextsDigest(supabaseAdmin);
       await sundayLabourReminder(supabaseAdmin);
+      await mondayBrief(supabaseAdmin);
     } catch (e) {
       console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
     }
