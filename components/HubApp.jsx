@@ -829,7 +829,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
         )}
       </div>
 
-      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} />
+      <TextsToSend quotes={quotes} invoices={invoices} leads={leads} setQuotes={setQuotes} setInvoices={setInvoices} setLeads={setLeads} go={go} />
 
       <JobChecks quotes={quotes} invoices={invoices} expenses={expenses} setExpenses={setExpenses} />
 

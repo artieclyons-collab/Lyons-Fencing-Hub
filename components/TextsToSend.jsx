@@ -3,7 +3,7 @@
 // Messages from Artie's own number. It can't send by itself (a web page can't), so after the tap it asks "did you
 // send it?" and only then marks it done, so it stops showing until it's due again.
 import { useState, useEffect, useMemo } from "react";
-import { Send, Copy, Check, Pencil, X, Phone, Mail } from "lucide-react";
+import { Send, Copy, Check, Pencil, X, Phone, Mail, FileText } from "lucide-react";
 import EmailModal from "./EmailModal";
 import IntroTextModal from "./IntroTextModal";
 import { smsLink } from "@/lib/introText";
@@ -14,7 +14,11 @@ const TEXTS_KEY = "lyons:texts";
 const SHOW_FIRST = 6; // the rest sit behind "Show more" so the Board doesn't get long
 const emailKind = { quote: "followup", job: "start", invoice: "chase", review: "review" };
 
-export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInvoices, setLeads }) {
+// where "Open" takes you for each kind of item (the quote, invoice or lead the text is about)
+const openTarget = (item) => (item.kind === "invoice" || item.kind === "review" ? { tab: "invoices", table: "invoices" } : item.kind === "lead" ? { tab: "leads", table: "leads" } : { tab: "quotes", table: "quotes" });
+const openLabel = (item) => (item.kind === "invoice" || item.kind === "review" ? "Open invoice" : item.kind === "lead" ? "Open lead" : "Open quote");
+
+export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInvoices, setLeads, go }) {
   const [texts, setTexts] = useState(DEFAULT_TEXTS);
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(null); // key waiting for "did you send it?"
@@ -87,6 +91,7 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
                   <span className="calc-note" style={{ margin: 0 }}><Phone size={12} /> No phone number on file</span>
                 )}
                 {item.email && <button className="btn-ghost small" onClick={() => setEmailing(item)} title={`Email ${item.email}`}><Mail size={13} /> Email</button>}
+                {go && <button className="btn-ghost small" onClick={() => go(openTarget(item).tab, { open: { table: openTarget(item).table, id: item.id } })}><FileText size={13} /> {openLabel(item)}</button>}
                 <button className="btn-ghost small" onClick={() => copy(item)}>{copied === item.key ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy text</>}</button>
                 <button className="btn-ghost small" onClick={() => markDone(item)} title="Already dealt with it another way">Done</button>
               </div>
