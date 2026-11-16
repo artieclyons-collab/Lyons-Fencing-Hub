@@ -234,6 +234,10 @@ export async function POST(req) {
       // A person's email.
       const lead = matchLead(leads, { address: e.address, text: e.text, display: isReply(e) ? e.display : "" });
       if (lead) {
+        // Each email is acted on ONCE. (The reader looks back a few days on every run, so without this an email that changes the address would
+        // be re-applied each time, and two emails with different addresses would swap the address back and forth.)
+        const msgId = String(e.messageId || `${lead.id}-${e.receivedAt?.getTime?.() || ""}-${String(e.text || "").slice(0, 30)}`);
+        if (seenSet.has(msgId)) continue;
         // "Yep go ahead" / "we've gone with someone else": moves their one sent quote to Accepted / Declined.
         let dec = null;
         const fresh = cleanBody(e.text);
@@ -247,8 +251,8 @@ export async function POST(req) {
         const patch = { ...(change?.patch || {}) };
         const applied = [...(change?.applied || [])];
         if (change?.fold) {
-          const mid = String(e.messageId || `${lead.id}-${e.receivedAt?.getTime?.() || ""}-${change.fold.text.slice(0, 30)}`);
-          if (!seenSet.has(mid)) {
+          {
+            const mid = msgId;
             seenSet.add(mid);
             seenList.push(mid);
             seenChanged = true;
@@ -276,6 +280,7 @@ export async function POST(req) {
         if (error) throw new Error(error.message);
         if (patch.name) await renameClient(supabaseAdmin, lead, patch.name);
         Object.assign(lead, patch);
+        if (!seenSet.has(msgId)) { seenSet.add(msgId); seenList.push(msgId); seenChanged = true; } // acted on: not again
         updated.push(`${lead.name} (${applied.join(", ")})`);
         if (applied.includes("site visit wanted")) alerts.push({ title: `Wants a visit: ${lead.name}`, body: "Asked you to come and look. It's on the Visit planner.", tag: `visit-${lead.id}`, url: "/?tab=visits" });
         console.log(`inbox: lead updated from an email (${applied.join(", ")})`);
