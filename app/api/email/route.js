@@ -12,6 +12,7 @@ import { sameClientName } from "@/lib/leadQuotes";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { renderPdf } from "@/lib/pdf";
 import { buildFilename, money, itemsTotal, gstBreakdown } from "@/lib/logic";
+import { CASH_PREFIX, cashPriceOf, quoteTotalInc, sensibleCashPrice } from "@/lib/cashPrice";
 import { KINDS, DAILY_CAP, COOLDOWN_SECONDS, MAX_DOCS, getMailer, composeEmail, docLabels, sendEmail, isEmail, suggestEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
@@ -115,7 +116,11 @@ async function handle(req) {
           .filter((r) => !ids.includes(r.id) && norm(r.clientName) === client && eligible(r))
           .map((r) => ({ id: r.id, label: [r.docNumber, r.jobType, money(gstBreakdown(itemsTotal(r.items)).total)].filter(Boolean).join(" · ") }))
       : [];
-    return NextResponse.json({ ok: true, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachments: attachmentNames, others, ids, suggest: suggestEmail(to), name: recs[0].clientName || "" }, NO_STORE);
+    // The cash price that could be offered for each quote (the quote email and its follow-up only)
+    const cash = ["quote", "followup"].includes(body.kind)
+      ? recs.map((r) => { const total = Math.round(quoteTotalInc(r) * 100) / 100; return { id: r.id, label: [r.docNumber, r.jobType].filter(Boolean).join(" · ") || "Quote", total, price: cashPriceOf(total) }; }).filter((c) => c.price > 0)
+      : [];
+    return NextResponse.json({ ok: true, cash, configured: !!mailer, from: mailer?.user || null, to: isEmail(to) ? to : "", subject, body: text, attachments: attachmentNames, others, ids, suggest: suggestEmail(to), name: recs[0].clientName || "" }, NO_STORE);
   }
 
   if (!mailer) return NextResponse.json({ error: "Email isn't set up yet — add GMAIL_USER and GMAIL_APP_PASSWORD." }, { status: 501 });
@@ -143,6 +148,16 @@ async function handle(req) {
   } catch (e) {
     console.error("email send failed", e.message);
     return NextResponse.json({ error: `Couldn't send: ${e.message}` }, { status: 502 });
+  }
+
+  // A cash price that went out in the email is remembered, so "Apply cash price" on the quote uses exactly that figure.
+  if (["quote", "followup"].includes(body.kind) && Array.isArray(body.cash)) {
+    for (const c of body.cash.slice(0, MAX_DOCS)) {
+      const rec = recs.find((r) => r.id === String(c?.id));
+      if (!rec || !sensibleCashPrice(quoteTotalInc(rec), c.price)) continue;
+      const { error: ce } = await supabaseAdmin.from("expenses").upsert({ id: `${CASH_PREFIX}${rec.id}`, category: "System", description: String(Math.round(Number(c.price))), amount: "0", date: todayBrisbane() });
+      if (ce) console.error("cash price not recorded", ce.message);
+    }
   }
 
   // Record it, so it isn't offered again and the quote moves on.

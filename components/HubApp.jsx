@@ -61,6 +61,8 @@ import PriceListUpdate from "./PriceListUpdate";
 import JobPhotos from "./JobPhotos";
 import MondayBrief from "./MondayBrief";
 import NeedsReply from "./NeedsReply";
+import CashPrice from "./CashPrice";
+import Referrals from "./Referrals";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
 
@@ -812,6 +814,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       <MondayBrief expenses={expenses} />
 
       <NeedsReply leads={leads} setLeads={setLeads} go={go} />
+
+      <Referrals leads={leads} quotes={quotes} invoices={invoices} setLeads={setLeads} setExpenses={setExpenses} go={go} />
 
       <div className="panel">
         <div className="panel-head">
@@ -2226,6 +2230,7 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
         )}
         {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this quote and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
+        <CashPrice form={form} setItems={setItems} />
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved quote with the PDF attached"><Mail size={15} /> Email quote</button>}

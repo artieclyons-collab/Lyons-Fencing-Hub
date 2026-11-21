@@ -18,7 +18,7 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
-import { sendPush, decisionAlert, nudgeUnanswered, nudgeNeedsReply, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
+import { sendPush, decisionAlert, nudgeUnanswered, nudgeNeedsReply, referralDueAlert, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { draftAlternativeQuote } from "@/lib/variantDraft";
 import { triageMessage } from "@/lib/triage";
@@ -357,6 +357,7 @@ export async function POST(req) {
       await sundayLabourReminder(supabaseAdmin);
       await mondayBrief(supabaseAdmin);
       await nudgeNeedsReply(supabaseAdmin);
+      await referralDueAlert(supabaseAdmin);
     } catch (e) {
       console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
     }

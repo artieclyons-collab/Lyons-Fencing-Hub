@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { Send, Check, X, Paperclip, AlertTriangle, Pencil, Plus } from "lucide-react";
 import { itemsTotal, gstBreakdown, money, uid } from "@/lib/logic";
+import { cashParagraph, withCashParagraph, sensibleCashPrice } from "@/lib/cashPrice";
 
 async function api(body) {
   const res = await fetch("/api/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -24,6 +25,18 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
   const [adj, setAdj] = useState(null); // the invoice being adjusted before it's sent
   const [adjBusy, setAdjBusy] = useState(false);
   const [reload, setReload] = useState(0); // bumps after the invoice is saved so the email is rebuilt from it
+  // Offer a cash price: about 10% off, rounded down to the nearest $50 (lib/cashPrice.js). Adds a sentence to the message; the price can be edited.
+  const [cashOn, setCashOn] = useState(false);
+  const [cashPrices, setCashPrices] = useState({}); // { quoteId: price }
+  const [cashPara, setCashPara] = useState(""); // the sentence currently in the message, so it can be swapped or taken out again
+  const cashItems = (info?.cash || []).map((c) => ({ ...c, price: Number(cashPrices[c.id] ?? c.price) || 0 }));
+  const cashBad = cashOn && cashItems.some((c) => !sensibleCashPrice(c.total, c.price));
+  const syncCash = (on, prices) => {
+    const items = (info?.cash || []).map((c) => ({ ...c, price: Number(prices[c.id] ?? c.price) || 0 })).filter((c) => sensibleCashPrice(c.total, c.price));
+    const next = on ? cashParagraph(items) : "";
+    setText((t) => withCashParagraph(t, cashPara, next));
+    setCashPara(next);
+  };
   const openAdjust = async () => {
     setAdjBusy(true);
     try {
@@ -53,6 +66,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
       setInfo(r.json);
       setSubject(r.json.subject);
       setText(r.json.body);
+      setCashOn(false); setCashPrices({}); setCashPara("");
       setState("ready");
     }).catch(() => { if (!off) { setMessage("Couldn't reach the hub."); setState("error"); } });
     return () => { off = true; };
@@ -62,7 +76,9 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
     setState("sending");
     setMessage("");
     try {
-      const r = await api({ kind, id, ids: extra, subject, body: text });
+      // (only recorded as offered if the cash paragraph is still in the message when it goes)
+      const cash = cashOn && cashPara && text.includes(cashPara) ? cashItems.filter((c) => sensibleCashPrice(c.total, c.price)).map((c) => ({ id: c.id, price: c.price })) : undefined;
+      const r = await api({ kind, id, ids: extra, subject, body: text, cash });
       if (!r.ok) { setMessage(r.json.error || "Couldn't send that."); setState("ready"); return; }
       setResult(r.json);
       setState("sent");
@@ -135,6 +151,22 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
                       <span>{o.label}</span>
                     </label>
                   ))}
+                </div>
+              )}
+              {info.cash?.length > 0 && (
+                <div className="email-others">
+                  <label className="check-row">
+                    <input type="checkbox" checked={cashOn} onChange={(e) => { setCashOn(e.target.checked); syncCash(e.target.checked, cashPrices); }} />
+                    <span>Offer a cash price (about 10% off, rounded down to the nearest $50)</span>
+                  </label>
+                  {cashOn && cashItems.map((c) => (
+                    <div key={c.id} className="line-item" style={{ alignItems: "center" }}>
+                      <span style={{ flex: 1 }} className="calc-note">{c.label}: {money(c.total)} inc. GST → cash</span>
+                      <input className="li-num" style={{ width: 100, flex: "none" }} type="number" step="50" value={cashPrices[c.id] ?? c.price} onChange={(e) => { const p = { ...cashPrices, [c.id]: e.target.value }; setCashPrices(p); syncCash(true, p); }} />
+                    </div>
+                  ))}
+                  {cashBad && <p className="calc-note" style={{ color: "var(--bad)", margin: 0 }}>That cash price looks off (it should be about 3–25% under the total), so it's left out of the message.</p>}
+                  <p className="calc-note" style={{ margin: 0 }}>GST is still charged on the cash price, and the job is still invoiced and banked. When they say yes, use "Apply cash price" on the quote.</p>
                 </div>
               )}
               <label className="field">

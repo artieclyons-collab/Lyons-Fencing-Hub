@@ -19,6 +19,7 @@ import { isPlaceholderName, introducedName, renameClient } from "@/lib/leadName"
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
+import { noteReferral } from "@/lib/referrals";
 import { detectBillTo, getBillTo, setBillTo, mentionsOtherHousehold } from "@/lib/billTo";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
@@ -129,6 +130,7 @@ export async function POST(req) {
     let notes = relevantParts(text, { max: 700 }) || clean.slice(0, 200);
     const found = parseAvailability(text);
     if (found.notBefore != null || found.notAfter != null) notes = withAvailability(notes, found);
+    notes = noteReferral(notes, text); // "Sam Jones recommended you" -> "Referred by: Sam Jones." (the referral reward, lib/referrals.js)
     const row = {
       // One lead per number: a second text arriving at the same moment (or a second automation) can't make a duplicate.
       id: `txt${from}`,
@@ -194,6 +196,8 @@ export async function POST(req) {
   }
 
   // "Can you put Gooding Drive Villas CTS 38702 in the invoice, it's required by the body corporate": quotes and invoices are made out to that
+  const referred = noteReferral(notes, text);
+  if (referred !== notes) { notes = referred; applied.push("referral"); }
   const billTo = detectBillTo(text);
   if (billTo && getBillTo(notes) !== billTo) {
     notes = setBillTo(notes, billTo);
