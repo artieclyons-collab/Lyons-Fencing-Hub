@@ -1744,6 +1744,13 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
   const [showEmail, setShowEmail] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [textClient, setTextClient] = useState(false);
+  const [textNums, setTextNums] = useState([]); // the quotes that were just emailed together, so the text names every one
+  // this quote plus the client's other quotes that are out with them (so "Text client" names them all, not just the open one)
+  const outQuoteNumbers = useMemo(() => {
+    const key = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const others = (allQuotes || []).filter((q) => q.id !== form.id && q.status === "Sent" && q.docNumber && key(q.clientName) && key(q.clientName) === key(form.clientName)).map((q) => q.docNumber);
+    return [...new Set([form.docNumber, ...others].filter(Boolean))].sort((a, b) => (Number(String(a).match(/\d+/)?.[0]) || 0) - (Number(String(b).match(/\d+/)?.[0]) || 0));
+  }, [allQuotes, form.id, form.docNumber, form.clientName]);
   const [scanPrefill, setScanPrefill] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState("");
@@ -2256,8 +2263,8 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
 
       {showPreview && <DocumentPreviewModal type="quote" data={form} onClose={() => setShowPreview(false)} />}
       {splitting && <SplitModal kind="quote" doc={form} number={`LFS${settings?.nextDocNumber || 458}`} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
-      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} onText={String(form.clientPhone || "").replace(/\D/g, "").length >= 8 ? () => { setShowEmail(false); setTextClient(true); } : null} />}
-      {textClient && <TextClientModal kind="quote" name={form.clientName} phone={form.clientPhone} docNumber={form.docNumber} onClose={() => setTextClient(false)} />}
+      {showEmail && <EmailModal kind="quote" id={initial.id} title="Email the quote" onClose={() => setShowEmail(false)} onSent={() => setForm((f) => (f.status === "Draft" ? { ...f, status: "Sent" } : f))} onText={String(form.clientPhone || "").replace(/\D/g, "").length >= 8 ? (res) => { setTextNums(res?.docNumbers || []); setShowEmail(false); setTextClient(true); } : null} />}
+      {textClient && <TextClientModal kind="quote" name={form.clientName} phone={form.clientPhone} docNumber={form.docNumber} docNumbers={textNums.length ? textNums : outQuoteNumbers} onClose={() => setTextClient(false)} />}
     </Modal>
   );
 }
@@ -2383,6 +2390,7 @@ function Invoices({ leads, invoices, setInvoices, expenses, setExpenses, quotes,
 function InvoiceModal({ pickOptions, initial, onClose, onSave, onDelete, onMarkPaid, onPersist, onSplit, nextNumber, phone }) {
   const [showEmail, setShowEmail] = useState(false);
   const [textClient, setTextClient] = useState(false);
+  const [textNums, setTextNums] = useState([]); // the invoices that were just emailed together
   const [splitting, setSplitting] = useState(false);
   const [form, setForm] = useState({ clientName: "", address: "", suburb: "", jobType: "", items: [], status: "Unpaid", issuedDate: today(), dueDate: "", docNumber: "", notes: "", ...initial });
   const [showPreview, setShowPreview] = useState(false);
@@ -2465,8 +2473,8 @@ function InvoiceModal({ pickOptions, initial, onClose, onSave, onDelete, onMarkP
       </div>
 
       {showPreview && <DocumentPreviewModal type="invoice" data={form} onClose={() => setShowPreview(false)} />}
-      {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} onText={() => { setShowEmail(false); setTextClient(true); }} />}
-      {textClient && <TextClientModal kind="invoice" name={form.clientName} phone={phone} docNumber={form.docNumber} total={money(gstBreakdown(itemsTotal(form.items)).total)} deposit={isDepositInvoice(form)} onClose={() => setTextClient(false)} />}
+      {showEmail && <EmailModal kind="invoice" id={initial.id} title="Email the invoice" onClose={() => setShowEmail(false)} onText={(res) => { setTextNums(res?.docNumbers || []); setShowEmail(false); setTextClient(true); }} />}
+      {textClient && <TextClientModal kind="invoice" name={form.clientName} phone={phone} docNumber={form.docNumber} docNumbers={textNums} total={money(gstBreakdown(itemsTotal(form.items)).total)} deposit={isDepositInvoice(form)} onClose={() => setTextClient(false)} />}
       {splitting && <SplitModal kind="invoice" doc={form} number={nextNumber} onClose={() => setSplitting(false)} onConfirm={(nb) => onSplit(form, nb)} />}
     </Modal>
   );

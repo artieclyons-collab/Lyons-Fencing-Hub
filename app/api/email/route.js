@@ -176,5 +176,5 @@ async function handle(req) {
       console.error("email sent but couldn't record it", e.message);
     }
   }
-  return NextResponse.json({ ok: true, to, marked, attached: attachments.map((a) => a.filename), test: !!mailer.test }, NO_STORE);
+  return NextResponse.json({ ok: true, to, marked, docNumbers: recs.map((r) => r.docNumber).filter(Boolean), attached: attachments.map((a) => a.filename), test: !!mailer.test }, NO_STORE);
 }

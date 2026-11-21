@@ -8,18 +8,24 @@ import { smsLink, firstName } from "@/lib/introText";
 const SIGN = "Cheers,\nArtie";
 
 // the wordings on offer for each kind of document
-const presets = ({ kind, name, docNumber, total, deposit }) => {
+// "LFS1" / "LFS1 and LFS2" / "LFS1, LFS2 and LFS3"
+const listNums = (nums) => (nums.length <= 1 ? nums[0] || "" : `${nums.slice(0, -1).join(", ")} and ${nums[nums.length - 1]}`);
+
+const presets = ({ kind, name, docNumber, docNumbers = [], total, deposit }) => {
+  // every document going to the client is named, not just the one that was open ("the quotes (LFS556 and LFS557)")
+  const nums = [...new Set((docNumbers.length ? docNumbers : [docNumber]).filter(Boolean))];
+  const many = nums.length > 1;
   // (no "it's Artie from Lyons Fencing": the client already has your message history)
   const hi = `Hi ${name || ""},`.replace("Hi ,", "Hi,");
-  const doc = docNumber ? ` (${docNumber})` : "";
+  const doc = nums.length ? ` (${listNums(nums)})` : "";
   if (kind === "quote") {
     return [
-      { label: "Just emailed the quote", text: `${hi}\n\nI've just emailed you the quote${doc}. Have a look when you get a chance, and let me know if you have any questions. If it's not in your inbox, check your junk folder.\n\n${SIGN}` },
-      { label: "Quote, nudge", text: `${hi}\n\nJust checking you got the quote${doc} I emailed through. Let me know if you have any questions or would like anything changed.\n\n${SIGN}` },
+      { label: "Just emailed the quote", text: `${hi}\n\nI've just emailed you the ${many ? "quotes" : "quote"}${doc}. Have a look when you get a chance, and let me know if you have any questions. If it's not in your inbox, check your junk folder.\n\n${SIGN}` },
+      { label: "Quote, nudge", text: `${hi}\n\nJust checking you got the ${many ? "quotes" : "quote"}${doc} I emailed through. Let me know if you have any questions or would like anything changed.\n\n${SIGN}` },
     ];
   }
   if (kind === "invoice") {
-    const what = deposit ? `the deposit invoice${docNumber ? ` ${docNumber}` : ""}` : `invoice${docNumber ? ` ${docNumber}` : ""}`;
+    const what = deposit ? `the deposit ${many ? "invoices" : "invoice"}${nums.length ? ` ${listNums(nums)}` : ""}` : `${many ? "invoices" : "invoice"}${nums.length ? ` ${listNums(nums)}` : ""}`;
     return [
       { label: "Just emailed the invoice", text: `${hi}\n\nI've just emailed you ${what}${total ? ` for ${total}` : ""}. The payment details are on it. Let me know if you have any questions.\n\n${SIGN}` },
     ];
@@ -27,9 +33,9 @@ const presets = ({ kind, name, docNumber, total, deposit }) => {
   return [{ label: "Blank", text: `${hi}\n\n` }];
 };
 
-export default function TextClientModal({ kind = "lead", name = "", phone = "", docNumber = "", total = "", deposit = false, onClose }) {
+export default function TextClientModal({ kind = "lead", name = "", phone = "", docNumber = "", docNumbers = [], total = "", deposit = false, onClose }) {
   const first = firstName(name);
-  const options = presets({ kind, name: first, docNumber, total, deposit });
+  const options = presets({ kind, name: first, docNumber, docNumbers, total, deposit });
   const [body, setBody] = useState(options[0].text);
   const [number, setNumber] = useState(phone || "");
   const [copied, setCopied] = useState(false);

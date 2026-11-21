@@ -193,7 +193,7 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
               {result?.attached?.length > 0 && <p className="calc-note">Attached: {result.attached.join(", ")}</p>}
               {onText && !result?.test && <p className="calc-note">Want to let them know by text too?</p>}
               <div className="modal-actions">
-                {onText && !result?.test && <button className="btn-ghost" onClick={onText}><Send size={15} /> Text them to say it's sent</button>}
+                {onText && !result?.test && <button className="btn-ghost" onClick={() => onText(result)}><Send size={15} /> Text them to say it's sent</button>}
                 <button className="btn-primary" onClick={onClose}><Check size={15} /> Done</button>
               </div>
             </>
