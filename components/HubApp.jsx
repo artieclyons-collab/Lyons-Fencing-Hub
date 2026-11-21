@@ -3,7 +3,7 @@
 // Component structure and behaviour are unchanged — only the storage layer
 // (Supabase instead of window.storage), the AI calls (server routes instead of
 // direct API calls) and the document download (real PDF endpoint) differ.
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import {
   LayoutGrid, Users, FileText, Receipt, Boxes, Wallet,
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
@@ -64,6 +64,7 @@ import MondayBrief from "./MondayBrief";
 import NeedsReply from "./NeedsReply";
 import CashPrice from "./CashPrice";
 import QuotePhoto from "./QuotePhoto";
+import { applyTemplateWording, applyWordingNow, resetWordingNow, hasSavedWording, wordingRow, wordingId } from "@/lib/templateWording";
 import { quoteFromNotes } from "@/lib/quoteFromNotes";
 import Referrals from "./Referrals";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
@@ -1116,6 +1117,51 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
   );
 }
 
+// Under a template line whose wording you've changed: "use this wording for future quotes" (and a way back to the standard wording).
+// Only the wording is remembered, never the price. See lib/templateWording.js.
+function WordingNote({ it, fenceHeight }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [, bump] = useState(0);
+  const t = it.tpl ? JOB_TEMPLATES.find((j) => j.label === it.tpl) : null;
+  if (!t) return null;
+  const std = postWording(String(t.desc).replace(/\{height\}/g, fenceHeight || "1.8"), it.qty);
+  const edited = !!String(it.desc || "").trim() && String(it.desc).trim() !== std.trim();
+  const saved = hasSavedWording(t.label);
+  if (!edited && !saved && !msg) return null;
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch("/api/data/expenses", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: [wordingRow(t.label, it.desc, today())] }) });
+      if (!res.ok) throw new Error("save failed");
+      applyWordingNow(t.label, it.desc);
+      setMsg(`Saved: new "${t.label}" lines will use this wording.`);
+      bump((n) => n + 1);
+      window.dispatchEvent(new Event("hub-refresh"));
+    } catch { setMsg("Couldn't save that — nothing was changed."); }
+    finally { setBusy(false); }
+  };
+  const reset = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch("/api/data/expenses", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [wordingId(t.label)] }) });
+      if (!res.ok) throw new Error("reset failed");
+      resetWordingNow(t.label);
+      setMsg("Back to the standard wording for new lines.");
+      bump((n) => n + 1);
+      window.dispatchEvent(new Event("hub-refresh"));
+    } catch { setMsg("Couldn't reset that — nothing was changed."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="calc-note" style={{ margin: "-2px 0 4px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      {edited && <button type="button" className="link-btn" onClick={save} disabled={busy}>Use this wording for future "{t.label}" lines</button>}
+      {saved && <button type="button" className="link-btn" onClick={reset} disabled={busy}>Your saved wording is in use · back to the standard wording</button>}
+      {msg && <span>{msg}</span>}
+    </div>
+  );
+}
+
 // ---------- Line items editor (shared by Quotes & Invoices) ----------
 function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTemplate }) {
   // changing the quantity of a template line keeps "post" / "posts" right in its wording (unless you've changed the wording yourself)
@@ -1152,7 +1198,8 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
   return (
     <div className="line-items">
       {items.map((it, idx) => (
-        <div className="line-item li-move" key={it.id}>
+        <Fragment key={it.id}>
+        <div className="line-item li-move">
           <input className="li-desc" placeholder="Description" value={it.desc} onChange={(e) => update(it.id, "desc", e.target.value)} />
           <input className="li-num" type="number" placeholder="Qty" value={it.qty} onChange={(e) => update(it.id, "qty", e.target.value)} />
           <input className="li-num" type="number" placeholder="Rate" value={it.rate} onChange={(e) => update(it.id, "rate", e.target.value)} />
@@ -1163,6 +1210,8 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
           </span>
           <button className="icon-btn" onClick={() => remove(it.id)}><X size={14} /></button>
         </div>
+        <WordingNote it={it} fenceHeight={fenceHeight} />
+        </Fragment>
       ))}
       <div className="li-add-row">
         <button className="btn-ghost small" onClick={add}><Plus size={14} /> Add line</button>
@@ -4251,6 +4300,8 @@ export default function HubApp() {
   const [invoices, setInvoices, invoicesLoaded] = usePersistedList("lyons:invoices");
   const [materials, setMaterials, materialsLoaded] = usePersistedList("lyons:materials");
   const [expenses, setExpenses, expensesLoaded] = usePersistedList("lyons:expenses");
+  // wording you've saved on a job template ("Use this wording for future quotes") applies to every new line from that template (lib/templateWording.js)
+  useMemo(() => { applyTemplateWording(expenses); }, [expenses]);
   const [settings, setSettings, settingsLoaded] = usePersistedValue("lyons:settings", { consumption: 10.5, fuelPrice: 1.85, tipRatePerMetre: 10, nextDocNumber: 458 });
 
   const allLoaded = leadsLoaded && quotesLoaded && invoicesLoaded && materialsLoaded && expensesLoaded && settingsLoaded;

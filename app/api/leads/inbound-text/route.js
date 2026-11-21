@@ -20,6 +20,7 @@ import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
 import { noteReferral } from "@/lib/referrals";
+import { loadTemplateWording } from "@/lib/templateWording";
 import { findEmail, hasEmail, shareEmail } from "@/lib/contactEmail";
 import { detectBillTo, getBillTo, setBillTo, mentionsOtherHousehold } from "@/lib/billTo";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
@@ -64,6 +65,7 @@ export async function POST(req) {
   if (!process.env.PHONE_AGENT_API_KEY) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database not configured" }, { status: 501 });
+  await loadTemplateWording(supabaseAdmin); // drafts use the wording you saved on job templates
 
   const body = await req.json().catch(() => ({}));
   const rawFrom = String(body.from || "").trim();

@@ -16,6 +16,7 @@ import { isJobDetails, parseJobDetails } from "@/lib/hipages";
 import { headerMap, classify, isReply, leadFromEmail, applyClientMessage, matchLead, cleanBody, findPhone, nameKeys } from "@/lib/inboxLeads";
 import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
+import { loadTemplateWording } from "@/lib/templateWording";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
 import { sendPush, decisionAlert, nudgeUnanswered, nudgeNeedsReply, referralDueAlert, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
@@ -166,6 +167,7 @@ export async function POST(req) {
   if (!sameOrigin(req) && !hasKey(req)) return NextResponse.json({ error: "Not allowed" }, { status: 403 });
   if (!configured()) return NextResponse.json({ configured: false });
   if (!supabaseAdmin) return NextResponse.json({ error: "Database not configured" }, { status: 501 });
+  await loadTemplateWording(supabaseAdmin); // drafts use the wording you saved on job templates
   // remember that the outside timer (cron-job.org) is calling, so the Board can say whether it's set up
   if (hasKey(req)) await supabaseAdmin.from("expenses").upsert({ id: "sys-timer", category: "System", description: JSON.stringify({ last: new Date().toISOString() }), amount: "0", date: new Date().toISOString().slice(0, 10) });
   if (running || Date.now() - lastRun < MIN_GAP_MS) return NextResponse.json({ configured: true, skipped: true });

@@ -84,7 +84,7 @@ async function handle(req) {
   if (recs.some((r) => norm(r.clientName) !== client)) return NextResponse.json({ error: "Those belong to different clients, so they can't go in one email." }, { status: 400 });
 
   // Who it goes to: the email saved on the document, else on its quote, else the matching lead's.
-  const { data: leads } = await supabaseAdmin.from("leads").select("name,phone,email");
+  const { data: leads } = await supabaseAdmin.from("leads").select("id,name,phone,email,status");
   const emailFor = async (rec) => {
     if (isEmail(rec.clientEmail)) return rec.clientEmail.trim();
     const quote = spec.table === "invoices" && rec.quoteId ? (await supabaseAdmin.from("quotes").select("clientName,clientPhone,clientEmail").eq("id", rec.quoteId).maybeSingle()).data : null;
@@ -174,6 +174,15 @@ async function handle(req) {
       await safeUpdate(spec.table, rec.id, patch);
     } catch (e) {
       console.error("email sent but couldn't record it", e.message);
+    }
+    // A quote that has gone out moves its lead on from New/Contacted to Quoted (a quote made outside "Start quote" never did).
+    if (body.kind === "quote") {
+      const p = tail(rec.clientPhone);
+      const lead = (leads || []).find((l) => ["New", "Contacted"].includes(l.status) && ((p.length === 9 && tail(l.phone) === p) || norm(l.name) === norm(rec.clientName)));
+      if (lead) {
+        const { error: le } = await supabaseAdmin.from("leads").update({ status: "Quoted" }).eq("id", lead.id).in("status", ["New", "Contacted"]);
+        if (le) console.error("quote sent but the lead wasn't moved to Quoted", le.message);
+      }
     }
   }
   return NextResponse.json({ ok: true, to, marked, docNumbers: recs.map((r) => r.docNumber).filter(Boolean), attached: attachments.map((a) => a.filename), test: !!mailer.test }, NO_STORE);
