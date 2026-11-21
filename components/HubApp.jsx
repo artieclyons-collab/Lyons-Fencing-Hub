@@ -63,6 +63,8 @@ import JobPhotos from "./JobPhotos";
 import MondayBrief from "./MondayBrief";
 import NeedsReply from "./NeedsReply";
 import CashPrice from "./CashPrice";
+import QuotePhoto from "./QuotePhoto";
+import { quoteFromNotes } from "@/lib/quoteFromNotes";
 import Referrals from "./Referrals";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
@@ -1906,6 +1908,15 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
     if (/sleeper/i.test(t.desc) && !(form.notes || "").includes(SLEEPER_NOTE)) addNote(SLEEPER_NOTE);
   };
 
+  // notes read from a photo or screenshot (components/QuotePhoto.jsx) -> quote lines, the same way "Start quote" on a lead does it
+  const [photoMsg, setPhotoMsg] = useState("");
+  const applyPhotoNotes = ({ notes, client }) => {
+    const out = quoteFromNotes(form, notes, client);
+    if (!out) { setPhotoMsg("Those notes didn't make any quote lines. Each line needs a length and a material, e.g. \"26m 1.8 colorbond\", or add the lines by hand below."); return; }
+    setForm((cur) => ({ ...cur, ...out.patch }));
+    setPhotoMsg(`Added from the photo: ${out.summary || "quote lines"}.${out.others.length ? ` The notes also hold ${out.others.length} more quote${out.others.length > 1 ? "s" : ""} (${out.others.join(", ")}): put each in its own quote, or start them from the lead's notes.` : ""} Check the lines and prices below.`);
+  };
+
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2080,6 +2091,8 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
 
       <Field label="Line items">
         <p className="calc-note">This is what the client sees and pays — "Insert job template" below uses your job length and fence height automatically.</p>
+        <QuotePhoto hasLines={form.items.length > 0} onApply={applyPhotoNotes} />
+        {photoMsg && <p className="calc-note" style={{ margin: "0 0 8px" }}>{photoMsg}</p>}
         <LineItems items={form.items} setItems={setItems} defaultLength={form.jobLength} fenceHeight={form.fenceHeight} onInsertTemplate={handleTemplateInserted} />
       </Field>
 
