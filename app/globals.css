@@ -535,3 +535,7 @@ body::before{ content:""; position:fixed; top:0; left:0; right:0; height:env(saf
 .fin-amt.good{ color:var(--good); }
 .fin-amt.bad{ color:var(--bad); }
 .fin-detail{ background:var(--surface2); border-radius:6px; padding:6px 10px; margin:0 0 10px 22px; }
+.line-item.li-move{ grid-template-columns:1fr 52px 64px 64px 20px 22px; }
+.li-arrows{ display:flex; flex-direction:column; gap:0; }
+.li-arrows .icon-btn{ padding:0; height:16px; line-height:1; }
+.li-arrows .icon-btn:disabled{ opacity:.25; cursor:default; }

@@ -9,7 +9,7 @@ import {
   Plus, X, Phone, MapPin, Trash2, ChevronRight,
   AlertTriangle, TrendingUp, TrendingDown, Check, Fuel, Settings, ClipboardPaste, Camera, CalendarDays, UserCircle, Download,
   ShoppingCart, Share2, Copy, Scissors, Hammer, Clock, Search, Droplets, Sun, Cloud, CloudSun, CloudFog, CloudDrizzle, CloudRain, CloudLightning,
-  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical, Sparkles, Upload } from "lucide-react";
+  Route, Navigation, Lock, Unlock, Car, Map as MapIcon, Send, Smartphone, Undo2, Mail, GripVertical, Sparkles, Upload, ChevronUp, ChevronDown } from "lucide-react";
 
 import {
   JOB_TYPES, LEAD_STATUSES, QUOTE_STATUSES, INVOICE_STATUSES, EXPENSE_CATEGORIES,
@@ -36,6 +36,7 @@ import { needsIntro } from "@/lib/introText";
 import EmailModal from "./EmailModal";
 import LabourInvoice from "./LabourInvoice";
 import FinanceBreakdown from "./FinanceBreakdown";
+import { cashDeals } from "@/lib/cashPrice";
 import { buildJobs, totalsOf, buildWeeks, weekLabel, shortDate, addDays, jobsSince, bookedSummary, projectedOf } from "@/lib/finances";
 import { labourLines, isLabourRow } from "@/lib/labourInvoice";
 import { isSystemRow, textLinkStatus } from "@/lib/systemRows";
@@ -631,7 +632,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
   // ----- money: what's come in and gone out so far, and what the booked jobs should make (same numbers as the Finances tab) -----
   const [moneyFrom] = useFinancesFrom();
   const moneyJobs = useMemo(
-    () => jobsSince(buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: t }), moneyFrom),
+    () => jobsSince(buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), cashDeals: cashDeals(expenses), today: t }), moneyFrom),
     [quotes, invoices, materials, expenses, moneyFrom, t]
   );
   const actual = useMemo(() => totalsOf(moneyJobs), [moneyJobs]);
@@ -1124,6 +1125,14 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
     return next;
   }));
   const remove = (id) => setItems((its) => its.filter((it) => it.id !== id));
+  // move a line up (-1) or down (+1): the order here is the order on the quote / invoice
+  const move = (id, dir) => setItems((its) => {
+    const i = its.findIndex((it) => it.id === id), j = i + dir;
+    if (i < 0 || j < 0 || j >= its.length) return its;
+    const next = [...its];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
   const add = () => setItems((its) => [...its, { id: uid(), desc: "", qty: 1, rate: 0 }]);
   const insertTemplate = (e) => {
     const label = e.target.value;
@@ -1140,12 +1149,16 @@ function LineItems({ items, setItems, defaultLength, fenceHeight, onInsertTempla
 
   return (
     <div className="line-items">
-      {items.map((it) => (
-        <div className="line-item" key={it.id}>
+      {items.map((it, idx) => (
+        <div className="line-item li-move" key={it.id}>
           <input className="li-desc" placeholder="Description" value={it.desc} onChange={(e) => update(it.id, "desc", e.target.value)} />
           <input className="li-num" type="number" placeholder="Qty" value={it.qty} onChange={(e) => update(it.id, "qty", e.target.value)} />
           <input className="li-num" type="number" placeholder="Rate" value={it.rate} onChange={(e) => update(it.id, "rate", e.target.value)} />
           <span className="li-total">{money(Number(it.qty || 0) * Number(it.rate || 0))}</span>
+          <span className="li-arrows">
+            <button type="button" className="icon-btn" onClick={() => move(it.id, -1)} disabled={idx === 0} aria-label="Move line up" title="Move up"><ChevronUp size={13} /></button>
+            <button type="button" className="icon-btn" onClick={() => move(it.id, 1)} disabled={idx === items.length - 1} aria-label="Move line down" title="Move down"><ChevronDown size={13} /></button>
+          </span>
           <button className="icon-btn" onClick={() => remove(it.id)}><X size={14} /></button>
         </div>
       ))}
@@ -2230,7 +2243,7 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
         )}
         {onSplit && <button className="btn-ghost" onClick={() => setSplitting(true)} title="Two neighbours sharing a fence: halve this quote and make one for the neighbour"><Scissors size={15} /> Split in half</button>}
         {initial?.id && <button className="btn-ghost" onClick={shareAcceptLink}><Share2 size={15} /> {linkCopied ? "Link copied!" : "Send for acceptance"}</button>}
-        <CashPrice form={form} setItems={setItems} />
+        <CashPrice form={form} />
         {onFinalInvoice && <button className="btn-ghost" onClick={onFinalInvoice}><Receipt size={15} /> Create final invoice</button>}
         <button className="btn-ghost" onClick={() => setShowPreview(true)}><FileText size={15} /> Preview & PDF</button>
         {initial?.id && <button className="btn-ghost" onClick={() => setShowEmail(true)} title="Emails the saved quote with the PDF attached"><Mail size={15} /> Email quote</button>}
@@ -2826,7 +2839,7 @@ function Finances({ invoices, expenses, setExpenses, quotes, materials, settings
   // so there are no receipts to log. Both are grouped by job and by week in lib/finances.js.
   const todayIso = today();
   const [from, chooseFrom] = useFinancesFrom();
-  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
+  const allJobs = useMemo(() => buildJobs({ quotes: quotes || [], invoices, materials: materials || [], labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), cashDeals: cashDeals(expenses), today: todayIso }), [quotes, invoices, materials, expenses, todayIso]);
   const manualExpenses = useMemo(() => expenses.filter((e) => !isLabourRow(e) && !isSystemRow(e) && !isSupplierRow(e)), [expenses]);
   const jobs = useMemo(() => jobsSince(allJobs, from), [allJobs, from]);
   const booked = useMemo(() => bookedSummary(jobs), [jobs]);

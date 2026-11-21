@@ -161,12 +161,12 @@ export default function EmailModal({ kind, id, title, onClose, onSent, onText })
                   </label>
                   {cashOn && cashItems.map((c) => (
                     <div key={c.id} className="line-item" style={{ alignItems: "center" }}>
-                      <span style={{ flex: 1 }} className="calc-note">{c.label}: {money(c.total)} inc. GST → cash</span>
+                      <span style={{ flex: 1 }} className="calc-note">{c.label}: {money(c.total)} → cash</span>
                       <input className="li-num" style={{ width: 100, flex: "none" }} type="number" step="50" value={cashPrices[c.id] ?? c.price} onChange={(e) => { const p = { ...cashPrices, [c.id]: e.target.value }; setCashPrices(p); syncCash(true, p); }} />
                     </div>
                   ))}
                   {cashBad && <p className="calc-note" style={{ color: "var(--bad)", margin: 0 }}>That cash price looks off (it should be about 3–25% under the total), so it's left out of the message.</p>}
-                  <p className="calc-note" style={{ margin: 0 }}>GST is still charged on the cash price, and the job is still invoiced and banked. When they say yes, use "Apply cash price" on the quote.</p>
+                  <p className="calc-note" style={{ margin: 0 }}>When they say yes, tap "Paying cash" on the quote so the hub's figures use the cash price. The quote and invoices you send stay as they are.</p>
                 </div>
               )}
               <label className="field">

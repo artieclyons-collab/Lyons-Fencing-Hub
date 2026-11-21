@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildAskContext, ASK_SYSTEM } from "@/lib/askContext";
 import { buildJobs } from "@/lib/finances";
+import { cashDeals } from "@/lib/cashPrice";
 import { labourLines } from "@/lib/labourInvoice";
 import { supplierInvoices } from "@/lib/supplierInvoice";
 import { jobProfits, routeKmMap } from "@/lib/jobProfit";
@@ -38,7 +39,7 @@ export async function POST(req) {
     const todayIso = brisbaneToday();
     let profitRows = [];
     try {
-      const jobs = buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), today: todayIso });
+      const jobs = buildJobs({ quotes, invoices, materials, labourLines: labourLines(expenses), supplierInvoices: supplierInvoices(expenses), cashDeals: cashDeals(expenses), today: todayIso });
       profitRows = jobProfits(jobs, settingsRows?.[0] || {}, routeKmMap(expenses));
     } catch (e) { console.log("ask: profit figures skipped —", String(e?.message || e).slice(0, 100)); }
     const facts = buildAskContext({ leads, quotes, invoices, expenses, profitRows, todayIso });
