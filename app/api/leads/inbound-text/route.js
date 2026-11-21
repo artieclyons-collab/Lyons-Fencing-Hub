@@ -20,6 +20,7 @@ import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes, clientFromQuotesByName, asksForNewWork, matchContact } from "@/lib/leadQuotes";
 import { sendPush } from "@/lib/push";
 import { noteReferral } from "@/lib/referrals";
+import { findEmail, hasEmail, shareEmail } from "@/lib/contactEmail";
 import { detectBillTo, getBillTo, setBillTo, mentionsOtherHousehold } from "@/lib/billTo";
 import { SYSTEM_CATEGORY, TEXT_IN_ID } from "@/lib/systemRows";
 
@@ -106,7 +107,7 @@ export async function POST(req) {
         id: `txt${tail(phone) || from}`,
         name: client.name || `Client ${phone}`,
         phone,
-        email: client.email || null,
+        email: client.email || findEmail(text) || null,
         address: enq.address || client.address || "",
         jobType: newWork ? (enq.jobType && enq.jobType !== "Other" ? enq.jobType : /post|repair|fix|replac/i.test(text) ? "Repairs" : client.jobType || "Other") : client.jobType || "Other",
         status: newWork ? "New" : client.status,
@@ -136,7 +137,7 @@ export async function POST(req) {
       id: `txt${from}`,
       name: enq.name || `Enquiry ${phone}`,
       phone,
-      email: null,
+      email: findEmail(text) || null,
       address: enq.address || "",
       jobType: enq.jobType,
       status: "New",
@@ -169,6 +170,19 @@ export async function POST(req) {
     patch.createdAt = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Brisbane" }).format(new Date());
     applied.push("new request");
     try { await sendPush(supabaseAdmin, { title: `New request: ${lead.name}`, body: text.replace(/\s+/g, " ").slice(0, 120), tag: `lead-${lead.id}`, url: "/" }); } catch {}
+  }
+
+  // "My email is sandra@gmail.com": saved on the lead and on their quotes / unpaid invoices that have no email yet.
+  const givenEmail = findEmail(text);
+  if (givenEmail) {
+    if (!hasEmail(lead.email)) {
+      patch.email = givenEmail;
+      applied.push("email");
+      try { await shareEmail(supabaseAdmin, lead, givenEmail); } catch (e) { console.log("inbound-text: couldn't share the email —", String(e?.message || e).slice(0, 100)); }
+    } else if (String(lead.email).trim().toLowerCase() !== givenEmail && !notes.includes(givenEmail)) {
+      notes = [notes.trim(), `Gave another email by text: ${givenEmail} (the lead has ${lead.email}).`].filter(Boolean).join("\n");
+      applied.push("another email");
+    }
   }
 
   // A lead with no name yet ("N/A") whose text says who they are ("it's Chen") gets their name.
