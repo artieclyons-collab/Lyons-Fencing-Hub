@@ -18,10 +18,12 @@ import { detectDecision, decideQuote, saveDecision } from "@/lib/quoteDecision";
 import { renameClient } from "@/lib/leadName";
 import { relevantParts } from "@/lib/relevant";
 import { clientFromQuotes } from "@/lib/leadQuotes";
-import { sendPush, decisionAlert, nudgeUnanswered, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
+import { sendPush, decisionAlert, nudgeUnanswered, nudgeNeedsReply, dailyTextsDigest, sundayLabourReminder } from "@/lib/push";
 import { foldUpdate, jobFacts } from "@/lib/noteSummary";
 import { draftAlternativeQuote } from "@/lib/variantDraft";
 import { triageMessage } from "@/lib/triage";
+import { parseWorkOrder } from "@/lib/workOrder";
+import { applyWorkOrder } from "@/lib/workOrderApply";
 import { mondayBrief } from "@/lib/brief";
 import { attachmentsOf, looksLikeSupplierMail, isSupplierSender, importSupplierMails } from "@/lib/supplierMail";
 
@@ -180,14 +182,15 @@ export async function POST(req) {
     const { data: leadRows, error: leadErr } = await supabaseAdmin.from("leads").select("id,name,phone,email,address,notes");
     if (leadErr) throw new Error(leadErr.message);
     const leads = [...(leadRows || [])];
-    const knownEmails = new Set(leads.map((l) => String(l.email || "").trim().toLowerCase()).filter(Boolean));
+    const boxOf = (x) => String(x || "").trim().toLowerCase().replace(/^mailto:/, "").replace(/\+[^@]*@/, "@").replace(/^([^@]+)@/, (_, l) => `${l.replace(/\./g, "")}@`); // ms.burnett@ and msburnett@ are the same mailbox
+    const knownEmails = new Set(leads.map((l) => boxOf(l.email)).filter(Boolean));
 
     // A reply is only worth downloading if it's from someone who is already a lead; a first email from a stranger always is.
     // a client's reply counts too when they have a quote but no lead
     const knownNames = new Set(leads.flatMap((l) => nameKeys(l.name)));
     for (const q of (await supabaseAdmin.from("quotes").select("clientEmail,clientName")).data || []) {
       const x = String(q.clientEmail || "").trim().toLowerCase();
-      if (x) knownEmails.add(x);
+      if (x) knownEmails.add(boxOf(x));
       for (const k of nameKeys(q.clientName)) knownNames.add(k);
     }
     // A reply is worth reading when it's from a known address, from someone whose name is a lead or a client (they may be writing from
@@ -197,7 +200,7 @@ export async function POST(req) {
     const { data: supSeenRow } = await supabaseAdmin.from("expenses").select("description").eq("id", SUP_SEEN_ID).maybeSingle();
     let supSeenList = [];
     try { supSeenList = JSON.parse(supSeenRow?.description || "[]") || []; } catch { supSeenList = []; }
-    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(String(s.address).toLowerCase()) || nameKeys(s.display).some((k) => knownNames.has(k)) || /lyons fencing/i.test(s.subject), new Set(supSeenList));
+    const emails = await fetchEmails(since, (s) => !isReply(s) || knownEmails.has(boxOf(s.address)) || nameKeys(s.display).some((k) => knownNames.has(k)) || /lyons fencing/i.test(s.subject), new Set(supSeenList));
     let quotesCache = null; // loaded only if an email sounds like an acceptance or a decline
     const loadQuotes = async () => {
       if (!quotesCache) quotesCache = (await supabaseAdmin.from("quotes").select("id,docNumber,clientName,clientPhone,clientEmail,address,suburb,jobType,status,date")).data || [];
@@ -228,6 +231,20 @@ export async function POST(req) {
         created.push(row.name);
         alerts.push({ title: `New hipages lead: ${row.name || "someone"}`, body: `${[row.address, row.jobType].filter(Boolean).join(" · ") || "Job details are in"}. Reply now, the first text wins.`, tag: `lead-${row.id}`, url: "/?tab=leads" });
         console.log("inbox: new lead added from a hipages job-details email");
+        continue;
+      }
+
+      // A property manager's work order: the quote it names is approved (once per email), and the access details are kept.
+      if (e.kind === "workorder") {
+        const wo = parseWorkOrder({ subject: e.subject, text: e.text });
+        const woId = String(e.messageId || `wo-${e.receivedAt?.getTime?.() || ""}`);
+        if (!wo || seenSet.has(woId)) continue;
+        seenSet.add(woId); seenList.push(woId); seenChanged = true;
+        try {
+          const r = await applyWorkOrder(supabaseAdmin, wo, { display: e.display });
+          updated.push(`${r.client} (work order ${r.docNumber})`);
+          console.log("inbox: work order applied");
+        } catch (err) { console.log("inbox: work order couldn't be applied —", String(err?.message || err).slice(0, 100)); }
         continue;
       }
 
@@ -339,6 +356,7 @@ export async function POST(req) {
       await dailyTextsDigest(supabaseAdmin);
       await sundayLabourReminder(supabaseAdmin);
       await mondayBrief(supabaseAdmin);
+      await nudgeNeedsReply(supabaseAdmin);
     } catch (e) {
       console.log("inbox: phone alerts failed —", String(e?.message || e).slice(0, 120));
     }

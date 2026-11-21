@@ -25,6 +25,9 @@ export async function POST() {
     "The panel next to the gate is already leaning after the storm, can you come and look",
     "Thanks heaps, the quote looks great, we'll go ahead",
     "What colour are the palings?",
+    "In the timber quote there are two gate options - timber pedestrian gate ($975) or capped paling timber gate ($475), is this correct? We mentioned cash, what would be the cost for a capped paling timber gate?",
+    "Whatever is easiest for you. I can't do tomorrow but can I do any other day this week, I just need a bit of notice.",
+    "Wonderful, thank you.",
   ];
   out.triage = await Promise.all(triage.map(async (t) => ({ text: t.slice(0, 60), result: await classifyTriage({ text: t, context: "Lead status: Quoted\nQuote LFS499: Accepted, starts 2026-11-23\nUnpaid invoice LFS494: $437" }) })));
   const alt = [

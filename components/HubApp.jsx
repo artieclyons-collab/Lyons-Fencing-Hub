@@ -60,6 +60,7 @@ import PaymentMatch from "./PaymentMatch";
 import PriceListUpdate from "./PriceListUpdate";
 import JobPhotos from "./JobPhotos";
 import MondayBrief from "./MondayBrief";
+import NeedsReply from "./NeedsReply";
 import { NO_VISIT, NO_VISIT_LINE, VISIT_WANTED } from "@/lib/visitRequest";
 import Assistant from "./Assistant";
 
@@ -809,6 +810,8 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
       </div>
 
       <MondayBrief expenses={expenses} />
+
+      <NeedsReply leads={leads} setLeads={setLeads} go={go} />
 
       <div className="panel">
         <div className="panel-head">

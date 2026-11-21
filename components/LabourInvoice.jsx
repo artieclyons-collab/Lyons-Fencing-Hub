@@ -3,13 +3,30 @@
 // Sending it texts Usher a link to the PDF (he opens it, saves it and emails it to you); the invoice number then moves on by one.
 // What's typed is kept on this device (draft, rate, bank details, past invoices) so it's all still there next time.
 import { useState, useEffect, useMemo } from "react";
-import { X, Plus, Download, FileText, Trash2, CalendarDays, Send } from "lucide-react";
+import { X, Plus, Download, FileText, Trash2, CalendarDays, Send, Camera } from "lucide-react";
 import { uid, today, money } from "@/lib/logic";
 import { addDaysIso } from "@/lib/jobSchedule";
 import { smsLink } from "@/lib/introText";
 import { LABOURER, PAYER, fmtAbn, parseHours, labourTotals, fmtHours, dayLabel, longDate, paidHours, encodeLabour, isLabourRow, labourRow, labourFromRow } from "@/lib/labourInvoice";
 
 const KEY = "lyons:labour-invoice";
+// a photo is shrunk before it's sent (the server takes about 4MB a request)
+function shrinkImage(file, max = 1600) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve({ base64: c.toDataURL("image/jpeg", 0.85).split(",")[1], mediaType: "image/jpeg" });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't open that image.")); };
+    img.src = url;
+  });
+}
 const QUICK_HOURS = [6, 7, 8, 9, 10];
 const FRESH = () => ({
   number: 1, date: today(), rate: LABOURER.rate, lunchMin: LABOURER.lunchMin,
@@ -44,6 +61,7 @@ export default function LabourInvoice({ addresses = [], expenses = [], setExpens
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
+  const [reading, setReading] = useState(false);
   useEffect(() => { setInv(load()); }, []);
   useEffect(() => {
     if (!inv) return;
@@ -97,6 +115,30 @@ export default function LabourInvoice({ addresses = [], expenses = [], setExpens
       d = addDaysIso(d, 1);
     }
     if (days.length) setInv((i) => ({ ...i, days: [...i.days, ...days] }));
+  };
+
+  // A photo or screenshot of his days and hours (a message, a note, a timesheet): Claude reads the days off it and they're added below, for you to check.
+  // Days already on the invoice are updated, not doubled.
+  const fromPhoto = async (files) => {
+    setReading(true); setError(""); setNote("");
+    try {
+      const images = [];
+      for (const f of Array.from(files || []).slice(0, 4)) images.push(await shrinkImage(f));
+      const res = await fetch("/api/ai/read-labour", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ images, today: today() }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Couldn't read that photo.");
+      if (!body.days?.length) throw new Error("I couldn't find any days and hours in that. Try a clearer photo, or type them in.");
+      setInv((i) => {
+        const byDate = new Map(i.days.map((d) => [d.date, d]));
+        for (const d of body.days) {
+          const have = byDate.get(d.date);
+          if (have) byDate.set(d.date, { ...have, hours: d.hours, address: d.address || have.address });
+          else byDate.set(d.date, { id: uid(), date: d.date, hours: d.hours, address: d.address || "" });
+        }
+        return { ...i, days: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)) };
+      });
+      setNote(`Added ${body.days.length} ${body.days.length === 1 ? "day" : "days"} from the photo. Check the dates and hours below.${body.unclear?.length ? ` Couldn't read: ${body.unclear.join(", ")}.` : ""}`);
+    } catch (e) { setError(e.message); } finally { setReading(false); }
   };
 
   // Once an invoice has gone out (downloaded or texted) it's kept in "Past invoices" and the next one starts, numbered one higher.
@@ -208,6 +250,7 @@ export default function LabourInvoice({ addresses = [], expenses = [], setExpens
             {QUICK_HOURS.map((h) => <button key={h} type="button" className="btn-ghost small" onClick={() => addDay(h)}>{h}h</button>)}
             <button type="button" className="btn-ghost small" onClick={() => addDay()}><Plus size={13} /> Same as last</button>
             <button type="button" className="btn-ghost small" onClick={addWeek}><CalendarDays size={13} /> Fill the week (to Fri)</button>
+            <label className="btn-ghost small" style={{ cursor: "pointer" }}><Camera size={13} /> {reading ? "Reading…" : "Fill from a photo"}<input type="file" accept="image/*" hidden disabled={reading} onChange={(e) => { fromPhoto(e.target.files); e.target.value = ""; }} /></label>
           </div>
           <p className="calc-note" style={{ marginTop: 0 }}>Hours can be typed as 8, 7.5, or a start–finish like 7-3:30. They're the hours on site, before lunch comes off.</p>
 
