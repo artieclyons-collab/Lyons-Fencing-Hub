@@ -1064,7 +1064,7 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
       ...f,
       name: f.name || client.name || "", phone: f.phone || client.phone || "", email: f.email || client.email || "", address: f.address || client.address || "",
       jobType: !initial && f.jobType === JOB_TYPES[0] && jt && JOB_TYPES.includes(jt) ? jt : f.jobType,
-      notes: f.notes ? `${f.notes}\n${notes}` : notes,
+      notes: !notes ? f.notes || "" : f.notes ? `${f.notes}\n${notes}` : notes,
     }));
   };
 
@@ -1973,6 +1973,13 @@ function QuoteModal({ pickOptions, initial, settings, materials, onClose, onSave
   // notes read from a photo or screenshot (components/QuotePhoto.jsx) -> quote lines, the same way "Start quote" on a lead does it
   const [photoMsg, setPhotoMsg] = useState("");
   const applyPhotoNotes = ({ notes, client }) => {
+    if (!String(notes || "").trim()) {
+      // just the client's details (a name, number, address): fill the empty boxes, no lines
+      const blank = (v) => !String(v ?? "").trim();
+      setForm((cur) => ({ ...cur, ...(blank(cur.clientName) && client.name ? { clientName: client.name } : {}), ...(blank(cur.clientPhone) && client.phone ? { clientPhone: client.phone } : {}), ...(blank(cur.clientEmail) && client.email ? { clientEmail: client.email } : {}), ...(blank(cur.address) && client.address ? { address: client.address } : {}) }));
+      setPhotoMsg("Filled in the client's details from the photo (only the empty boxes).");
+      return;
+    }
     const out = quoteFromNotes(form, notes, client);
     if (!out) { setPhotoMsg("Those notes didn't make any quote lines. Each line needs a length and a material, e.g. \"26m 1.8 colorbond\", or add the lines by hand below."); return; }
     setForm((cur) => ({ ...cur, ...out.patch }));

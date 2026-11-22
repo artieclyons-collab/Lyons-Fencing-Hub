@@ -42,7 +42,9 @@ export default function QuotePhoto({ hasLines, onApply, applyLabel = "Make the q
       const r = await fetch("/api/ai/read-quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ images }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "Couldn't read that.");
-      if (!String(j.notes || "").trim()) throw new Error("I couldn't find any job details in that. Try a clearer or closer photo, or type the notes in.");
+      // (a screenshot of just a name, number and address is fine: it fills the client's boxes, with no job notes)
+      const c0 = j.client || {};
+      if (!String(j.notes || "").trim() && ![c0.name, c0.phone, c0.email, c0.address].some(Boolean)) throw new Error("I couldn't find any details in that. Try a clearer or closer photo, or type them in.");
       setRes(j);
       setNotes(j.notes);
     } catch (err) {
@@ -71,7 +73,7 @@ export default function QuotePhoto({ hasLines, onApply, applyLabel = "Make the q
           {hasLines && <p className="calc-note" style={{ margin: 0 }}>{existing}</p>}
           <div className="modal-actions" style={{ marginTop: 6 }}>
             <button type="button" className="btn-ghost" onClick={() => setRes(null)}><X size={14} /> Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply} disabled={!notes.trim()}><Check size={15} /> {applyLabel}</button>
+            <button type="button" className="btn-primary" onClick={apply} disabled={!notes.trim() && !clientBits.length}><Check size={15} /> {applyLabel}</button>
           </div>
         </div>
       )}

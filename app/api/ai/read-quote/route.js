@@ -11,7 +11,7 @@ export const maxDuration = 60;
 // there: it never invents a measurement or a price. The screen shows the notes to check and change before anything becomes quote lines.
 const RULES = CLEAN_NOTES_SYSTEM.split("\nReturn ONLY")[0];
 const SYSTEM = `${RULES}
-The input is one or more PHOTOS or SCREENSHOTS (handwritten site notes, a whiteboard, a sketch with measurements, or a message or email from the client). Read them and write the notes in the style above. Ignore anything that is not about the job.
+The input is one or more PHOTOS or SCREENSHOTS (handwritten site notes, a whiteboard, a sketch with measurements, or a message or email from the client). Read them and write the notes in the style above. Ignore anything that is not about the job or the client. If the picture shows only the client's contact details (a name, number, address or email, for example a contact card or the top of a message) and nothing about the job, return "notes" as "" and still fill in "client".
 Also copy the client's name, mobile number, email and the job's street address if they are clearly shown (leave a field "" if not shown).
 Return ONLY raw JSON, no markdown: {"notes": "the lines, separated by newlines", "unclear": ["short things you could not read or tell"], "client": {"name": "", "phone": "", "email": "", "address": ""}}`;
 
