@@ -64,6 +64,7 @@ import MondayBrief from "./MondayBrief";
 import NeedsReply from "./NeedsReply";
 import CashPrice from "./CashPrice";
 import QuotePhoto from "./QuotePhoto";
+import { syncContacts } from "@/lib/contactSync";
 import { applyTemplateWording, applyWordingNow, resetWordingNow, hasSavedWording, wordingRow, wordingId } from "@/lib/templateWording";
 import { quoteFromNotes } from "@/lib/quoteFromNotes";
 import Referrals from "./Referrals";
@@ -1502,7 +1503,14 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
       setQuotes((qs) => [{ ...row, id: uid(), date: row.date || today() }, ...qs]);
       // A quote started from a lead means the site visit is done: the lead moves to Quoted (and leaves the Visit planner).
       if (_fromLeadId) setLeads((ls) => ls.map((l) => (l.id === _fromLeadId && ["New", "Contacted"].includes(l.status) ? { ...l, status: "Quoted" } : l)));
-      if (_batch && queue.length > 0) { openNextInQueue(true); return; }
+      if (_batch && queue.length > 0) {
+        // (the quotes still waiting are for the same client: they pick up the email and phone just typed)
+        const fillIt = (it) => ({ ...it, clientEmail: it.clientEmail || row.clientEmail || "", clientPhone: it.clientPhone || row.clientPhone || "" });
+        const [next0, ...rest0] = queue.map(fillIt);
+        setQueue(rest0);
+        setModal({ mode: "new", dupKey: Date.now(), data: { ...next0, docNumber: `LFS${(Number(settings?.nextDocNumber) || 458) + 1}` } });
+        return;
+      }
     }
     setModal(null);
   };
@@ -4324,6 +4332,15 @@ export default function HubApp() {
   const [invoices, setInvoices, invoicesLoaded] = usePersistedList("lyons:invoices");
   const [materials, setMaterials, materialsLoaded] = usePersistedList("lyons:materials");
   const [expenses, setExpenses, expensesLoaded] = usePersistedList("lyons:expenses");
+  // an email or phone typed once is filled in on the client's other quotes, invoices and lead (only blanks, only when it's unambiguous: lib/contactSync.js)
+  useEffect(() => {
+    if (!leadsLoaded || !quotesLoaded || !invoicesLoaded) return;
+    const r = syncContacts({ quotes, leads, invoices });
+    if (!r.changed) return;
+    if (r.quotes !== quotes) setQuotes(r.quotes);
+    if (r.leads !== leads) setLeads(r.leads);
+    if (r.invoices !== invoices) setInvoices(r.invoices);
+  }, [quotes, leads, invoices, leadsLoaded, quotesLoaded, invoicesLoaded]);
   // wording you've saved on a job template ("Use this wording for future quotes") applies to every new line from that template (lib/templateWording.js)
   useMemo(() => { applyTemplateWording(expenses); }, [expenses]);
   const [settings, setSettings, settingsLoaded] = usePersistedValue("lyons:settings", { consumption: 10.5, fuelPrice: 1.85, tipRatePerMetre: 10, nextDocNumber: 458 });
