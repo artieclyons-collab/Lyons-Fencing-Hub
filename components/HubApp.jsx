@@ -65,6 +65,7 @@ import NeedsReply from "./NeedsReply";
 import CashPrice from "./CashPrice";
 import QuotePhoto from "./QuotePhoto";
 import { syncContacts } from "@/lib/contactSync";
+import { carryAcross, sharedKey, sameJobDrafts } from "@/lib/sharedLines";
 import { applyTemplateWording, applyWordingNow, resetWordingNow, hasSavedWording, wordingRow, wordingId } from "@/lib/templateWording";
 import { quoteFromNotes } from "@/lib/quoteFromNotes";
 import Referrals from "./Referrals";
@@ -1495,6 +1496,13 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
 
   const save = (data) => {
     const { _fromLeadId, _draft, _batch, ...row } = data;
+    // Several quotes for the same job (Marcela's butted / Colorbond / lapped & capped): lines that are the same whatever the fence is made of (removal, vegetation,
+    // anything you added by hand) that you changed here are carried to the other quotes for that job, saved or still waiting (lib/sharedLines.js)
+    const sharedChanged = row.status === "Draft" && sharedKey(modal?.data?.items) !== sharedKey(row.items);
+    if (sharedChanged) {
+      const sibs = sameJobDrafts({ ...row, date: row.date || today() }, quotes);
+      if (sibs.length) setQuotes((qs) => qs.map((q) => (sibs.some((x) => x.id === q.id) ? { ...q, items: carryAcross(row.items, q.items, uid) } : q)));
+    }
     // marking a quote Accepted by hand records the day, the same as when the client accepts online (the win-rate and Board lists use it)
     if (row.status === "Accepted" && !row.acceptedAt && quotes.find((q) => q.id === row.id)?.status !== "Accepted") row.acceptedAt = today();
     if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
@@ -1505,7 +1513,7 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
       if (_fromLeadId) setLeads((ls) => ls.map((l) => (l.id === _fromLeadId && ["New", "Contacted"].includes(l.status) ? { ...l, status: "Quoted" } : l)));
       if (_batch && queue.length > 0) {
         // (the quotes still waiting are for the same client: they pick up the email and phone just typed)
-        const fillIt = (it) => ({ ...it, clientEmail: it.clientEmail || row.clientEmail || "", clientPhone: it.clientPhone || row.clientPhone || "" });
+        const fillIt = (it) => ({ ...it, clientEmail: it.clientEmail || row.clientEmail || "", clientPhone: it.clientPhone || row.clientPhone || "", ...(sharedChanged ? { items: carryAcross(row.items, it.items, uid) } : {}) });
         const [next0, ...rest0] = queue.map(fillIt);
         setQueue(rest0);
         setModal({ mode: "new", dupKey: Date.now(), data: { ...next0, docNumber: `LFS${(Number(settings?.nextDocNumber) || 458) + 1}` } });
