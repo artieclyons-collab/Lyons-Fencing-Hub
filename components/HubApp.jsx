@@ -795,6 +795,7 @@ function Dashboard({ leads, quotes, invoices, materials, expenses, go, setLeads,
                 <div>{w.lead.name || "New lead"}{w.lead.address ? ` · ${w.lead.address}` : ""}</div>
                 <div className="attention-sub">{w.mins != null ? (w.mins < 1 ? "just came in" : `waiting ${w.mins} min`) : `came in ${w.days === 1 ? "yesterday" : `${w.days} days ago`}`} — the first text wins the job. Tap to open Leads and send the intro text.</div>
               </div>
+              <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); setLeads((ls) => ls.map((x) => (x.id === w.lead.id && x.status === "New" ? { ...x, status: "Contacted" } : x))); }} title="Already messaged or called them? Marks the lead Contacted without opening Messages"><Check size={13} /> Already contacted</button>
               <ChevronRight size={16} />
             </div>
           ))}
@@ -1022,7 +1023,10 @@ function Leads({ leads, quotes = [], setLeads, go, pendingOpen, clearOpen }) {
                 </div>
               </div>
               {needsIntro(l) && !coveredByQuote(l, quotes) && (
-                <button className="btn-primary small" onClick={(e) => { e.stopPropagation(); setIntroFor(l); }} title="A first text to send from your phone, ready to edit"><Send size={13} /> Intro text</button>
+                <>
+                  <button className="btn-primary small" onClick={(e) => { e.stopPropagation(); setIntroFor(l); }} title="A first text to send from your phone, ready to edit"><Send size={13} /> Intro text</button>
+                  <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); setLeads((ls) => ls.map((x) => (x.id === l.id && x.status === "New" ? { ...x, status: "Contacted" } : x))); }} title="Already messaged or called them? Marks the lead Contacted without opening Messages"><Check size={13} /> Contacted</button>
+                </>
               )}
               {["New", "Contacted"].includes(l.status) && !coveredByQuote(l, quotes) && (
                 <button className="btn-ghost small" onClick={(e) => { e.stopPropagation(); go("quotes", { newFromLead: l }); }} title="Start a quote with their details filled in"><FileText size={13} /> Start quote</button>

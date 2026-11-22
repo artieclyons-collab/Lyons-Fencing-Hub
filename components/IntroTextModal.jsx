@@ -68,6 +68,7 @@ export default function IntroTextModal({ lead, onClose, onSent }) {
           ) : (
             <div className="modal-actions">
               <button className="btn-ghost" onClick={copy}>{copied ? <><Check size={15} /> Copied</> : <><Copy size={15} /> Copy text</>}</button>
+              <button className="btn-ghost" onClick={() => { onSent(lead); onClose(); }} title="You already messaged or called them: marks the lead Contacted without opening Messages"><Check size={15} /> Already contacted</button>
               <button className="btn-primary" onClick={open}><Send size={15} /> Open in Messages</button>
             </div>
           )}
