@@ -23,7 +23,8 @@ function shrinkImage(file, max = 1600) {
   });
 }
 
-export default function QuotePhoto({ hasLines, onApply }) {
+// Used on a quote (default wording) and on a lead (applyLabel / help / note / existing set by the lead window).
+export default function QuotePhoto({ hasLines, onApply, applyLabel = "Make the quote lines", help = "This is what I read. Check it and fix anything before it becomes quote lines (one fence section per line, blank line between separate quotes).", existing = "The quote already has lines, so these are added after them.", title = "A photo of handwritten notes, a sketch, or a screenshot of the client's message" }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -56,21 +57,21 @@ export default function QuotePhoto({ hasLines, onApply }) {
 
   return (
     <div style={{ margin: "6px 0 10px" }}>
-      <button type="button" className="btn-ghost small" onClick={() => inputRef.current?.click()} disabled={busy} title="A photo of handwritten notes, a sketch, or a screenshot of the client's message">
+      <button type="button" className="btn-ghost small" onClick={() => inputRef.current?.click()} disabled={busy} title={title}>
         <Camera size={14} /> {busy ? "Reading it…" : "Fill in from a photo or screenshot"}
       </button>
       <input type="file" accept="image/*" multiple ref={inputRef} style={{ display: "none" }} onChange={pick} />
       {error && <p className="calc-note" style={{ color: "var(--bad)", margin: "6px 0 0" }}><AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> {error}</p>}
       {res && (
         <div className="email-others" style={{ marginTop: 8 }}>
-          <span className="calc-note" style={{ margin: 0 }}>This is what I read. Check it and fix anything before it becomes quote lines (one fence section per line, blank line between separate quotes).</span>
+          <span className="calc-note" style={{ margin: 0 }}>{help}</span>
           <textarea rows={Math.min(10, Math.max(4, notes.split("\n").length + 1))} value={notes} onChange={(e) => setNotes(e.target.value)} />
           {res.unclear?.length > 0 && <p className="calc-note" style={{ color: "var(--bad)", margin: 0 }}>Couldn't tell: {res.unclear.join("; ")}</p>}
-          {clientBits.length > 0 && <p className="calc-note" style={{ margin: 0 }}>Client details seen: {clientBits.join(" · ")} (only filled in where the quote's boxes are empty).</p>}
-          {hasLines && <p className="calc-note" style={{ margin: 0 }}>The quote already has lines, so these are added after them.</p>}
+          {clientBits.length > 0 && <p className="calc-note" style={{ margin: 0 }}>Client details seen: {clientBits.join(" · ")} (only filled in where the boxes are empty).</p>}
+          {hasLines && <p className="calc-note" style={{ margin: 0 }}>{existing}</p>}
           <div className="modal-actions" style={{ marginTop: 6 }}>
             <button type="button" className="btn-ghost" onClick={() => setRes(null)}><X size={14} /> Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply} disabled={!notes.trim()}><Check size={15} /> Make the quote lines</button>
+            <button type="button" className="btn-primary" onClick={apply} disabled={!notes.trim()}><Check size={15} /> {applyLabel}</button>
           </div>
         </div>
       )}

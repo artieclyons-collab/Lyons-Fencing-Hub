@@ -1056,8 +1056,21 @@ function LeadModal({ initial, onClose, onSave, onDelete, onQuote }) {
   const [showText, setShowText] = useState(false);
   const [textClient, setTextClient] = useState(false);
 
+  // a photo or screenshot (a client's text, a note, a message) read into the boxes below: only empty boxes are filled, and the notes are added to
+  const applyPhoto = ({ notes, client }) => {
+    let jt = null;
+    try { jt = parseSiteJobs(notes, {}).find((d) => d.items.length > 0)?.jobType || null; } catch { jt = null; }
+    setForm((f) => ({
+      ...f,
+      name: f.name || client.name || "", phone: f.phone || client.phone || "", email: f.email || client.email || "", address: f.address || client.address || "",
+      jobType: !initial && f.jobType === JOB_TYPES[0] && jt && JOB_TYPES.includes(jt) ? jt : f.jobType,
+      notes: f.notes ? `${f.notes}\n${notes}` : notes,
+    }));
+  };
+
   return (
     <Modal title={initial ? "Edit lead" : "New lead"} onClose={onClose}>
+      <QuotePhoto hasLines={!!form.notes} onApply={applyPhoto} applyLabel="Use these details" help="This is what I read (a client's text, a note, a message). Check it and fix anything, then it fills the boxes below and you press Save." existing="The lead already has notes, so these are added after them." title="A screenshot of the client's text or message, or a photo of a note" />
       <Field label="Name"><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Client or business name" /></Field>
       <div className="field-pair">
         <Field label="Phone"><input value={form.phone || ""} onChange={(e) => set("phone", e.target.value)} placeholder="04xx xxx xxx" /></Field>
