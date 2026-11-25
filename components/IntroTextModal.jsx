@@ -29,8 +29,10 @@ export default function IntroTextModal({ lead, onClose, onSent }) {
     if (!edited) setBody(introDraft(lead, texts, j));
   };
   const open = () => {
-    setOpened(true);
+    // opening the text counts as sent: the lead is marked Contacted straight away (no "did you send it?" to come back and answer)
+    onSent(lead);
     window.location.href = smsLink(lead.phone, body);
+    onClose();
   };
   const copy = async () => {
     try {

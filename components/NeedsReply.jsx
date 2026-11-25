@@ -21,7 +21,7 @@ export default function NeedsReply({ leads = [], setLeads, go }) {
             <div className="upcoming-sub">{n.summary}</div>
             <div className="text-actions">
               <button className="btn-primary small" onClick={() => done(l.id)}><Check size={13} /> Replied</button>
-              {l.phone && <a className="btn-ghost small" href={smsLink(l.phone, "")}><Phone size={13} /> Text</a>}
+              {l.phone && <a className="btn-ghost small" href={smsLink(l.phone, "")} onClick={() => done(l.id)} title="Opens Messages and counts as replied"><Phone size={13} /> Text</a>}
               <button className="btn-ghost small" onClick={() => go("leads", { open: { table: "leads", id: l.id } })}><FileText size={13} /> Open lead</button>
             </div>
           </div>

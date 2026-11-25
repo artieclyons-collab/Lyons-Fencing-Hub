@@ -49,7 +49,8 @@ export default function TextsToSend({ quotes, invoices, leads, setQuotes, setInv
   };
   const open = (item) => {
     if (item.kind === "lead") { setIntro(item.lead); return; }
-    setPending(item.key);
+    // Tapping the text link counts as sent: it's ticked off straight away, so there is no "did you send it?" to go back and answer
+    markDone(item);
     window.location.href = smsLink(item.phone, item.body);
   };
   const copy = async (item) => {

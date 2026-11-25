@@ -1456,6 +1456,7 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
     else if (quotes.length > 0) clearOpen?.();
   }, [pendingOpen, quotes]);
   const [finalInvoiceQuote, setFinalInvoiceQuote] = useState(null);
+  const [autoDeposit, setAutoDeposit] = useState(null); // { docNumber, name, total }: the deposit invoice just raised when a quote was marked Accepted
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sortMode, setSortMode] = useSortMode("quotes");
@@ -1505,10 +1506,12 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
     }
     // marking a quote Accepted by hand records the day, the same as when the client accepts online (the win-rate and Board lists use it)
     if (row.status === "Accepted" && !row.acceptedAt && quotes.find((q) => q.id === row.id)?.status !== "Accepted") row.acceptedAt = today();
+    const wasAccepted = row.id ? quotes.find((q) => q.id === row.id)?.status === "Accepted" : false;
+    const newId = row.id || uid();
     if (row.id) setQuotes((qs) => qs.map((q) => (q.id === row.id ? row : q)));
     else {
       bumpDocNumber();
-      setQuotes((qs) => [{ ...row, id: uid(), date: row.date || today() }, ...qs]);
+      setQuotes((qs) => [{ ...row, id: newId, date: row.date || today() }, ...qs]);
       // A quote started from a lead means the site visit is done: the lead moves to Quoted (and leaves the Visit planner).
       if (_fromLeadId) setLeads((ls) => ls.map((l) => (l.id === _fromLeadId && ["New", "Contacted"].includes(l.status) ? { ...l, status: "Quoted" } : l)));
       if (_batch && queue.length > 0) {
@@ -1519,6 +1522,14 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
         setModal({ mode: "new", dupKey: Date.now(), data: { ...next0, docNumber: `LFS${(Number(settings?.nextDocNumber) || 458) + 1}` } });
         return;
       }
+    }
+    // Marking a quote Accepted raises its deposit invoice straight away (Unpaid, with the deposit due before the start date; it is not sent to anyone: you email it from Invoices)
+    if (row.status === "Accepted" && !wasAccepted && (row.items || []).length > 0 && itemsTotal(row.items) > 0 && !invoices.some((i) => i.quoteId === newId && isDepositInvoice(i))) {
+      const docNumber = row.id ? previewNumber() : `LFS${(Number(settings?.nextDocNumber) || 458) + 1}`;
+      bumpDocNumber();
+      const dep = buildDepositInvoice({ ...row, id: newId }, docNumber);
+      setInvoices((is) => [dep, ...is]);
+      setAutoDeposit({ docNumber, name: row.clientName, total: gstBreakdown(itemsTotal(dep.items)).total });
     }
     setModal(null);
   };
@@ -1623,8 +1634,7 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
   // Bills just the deposit — the ex-GST line amount works out so that once GST is
   // added back on, the invoice total lands exactly on the deposit % of the full job.
   // `docNumber` is passed in when the quote was only just created (it took the next number itself).
-  const createDepositInvoice = (q, docNumber = previewNumber()) => {
-    bumpDocNumber();
+  const buildDepositInvoice = (q, docNumber) => {
     const depositPct = Number(q.depositPercent) || 10;
     const exGstAmount = itemsTotal(q.items) * (depositPct / 100);
     const inv = {
@@ -1651,7 +1661,11 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
       notes: `${DEPOSIT_DUE_NOTE}, per quote ${q.docNumber || ""}.`,
       quoteId: q.id,
     };
-    setInvoices((is) => [inv, ...is]);
+    return inv;
+  };
+  const createDepositInvoice = (q, docNumber = previewNumber()) => {
+    bumpDocNumber();
+    setInvoices((is) => [buildDepositInvoice(q, docNumber), ...is]);
     setModal(null);
     go?.("invoices");
   };
@@ -1697,6 +1711,15 @@ function Quotes({ leads, quotes, setQuotes, setLeads, invoices, setInvoices, pen
         </div>
       </div>
       {quickScanError && <p className="calc-note" style={{ color: "var(--bad)", marginBottom: 14 }}>{quickScanError}</p>}
+      {autoDeposit && (
+        <div className="panel" style={{ borderColor: "var(--good)" }}>
+          <p style={{ margin: "0 0 8px" }}><Check size={15} style={{ verticalAlign: "-2px" }} /> Deposit invoice {autoDeposit.docNumber} ({money(autoDeposit.total)}) was made for {autoDeposit.name || "the client"}. It hasn't been sent: email it from Invoices when you're ready.</p>
+          <div className="text-actions">
+            <button className="btn-primary small" onClick={() => { setAutoDeposit(null); go?.("invoices"); }}><Receipt size={13} /> Open Invoices</button>
+            <button className="btn-ghost small" onClick={() => setAutoDeposit(null)}>OK</button>
+          </div>
+        </div>
+      )}
       {oldDrafts.length > 0 && (
         <TidyUp
           text={`${nOf(oldDrafts.length, "quote")} still marked Draft after a month (${oldDrafts.slice(0, 4).map((q) => q.docNumber).join(", ")}${oldDrafts.length > 4 ? "…" : ""}). If they went out, mark them Sent so they're tracked and followed up.`}
